@@ -60,7 +60,7 @@ type Template {
 
 @block("runtime")
 type Runtime {
-  @doc("Base system: oci://image, tar://path-or-url, or dir://path")
+  @doc("Base system: oci://image (native registry pull), docker://image (docker export), tar://path-or-url, or dir://path")
   base: utf8
   @doc("Install 32-bit libraries too (Wine needs this)")
   @default(false) multilib: bool?

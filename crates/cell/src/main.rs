@@ -9,6 +9,8 @@
 mod build;
 mod model;
 mod ns;
+mod oci;
+mod unpack;
 
 use std::path::{Path, PathBuf};
 

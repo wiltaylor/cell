@@ -413,12 +413,12 @@ pub fn validate(plan: &Plan) -> Vec<String> {
             issues.push(format!("layer {}: mount must be an absolute path", l.name));
         }
     }
-    let scheme_ok = ["oci://", "tar://", "dir://"]
+    let scheme_ok = ["oci://", "docker://", "tar://", "dir://"]
         .iter()
         .any(|s| plan.runtime.base.starts_with(s));
     if !scheme_ok {
         issues.push(format!(
-            "runtime.base `{}` must start with oci://, tar:// or dir://",
+            "runtime.base `{}` must start with oci://, docker://, tar:// or dir://",
             plan.runtime.base
         ));
     }
