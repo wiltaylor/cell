@@ -1,0 +1,6 @@
+#!/bin/sh
+set -e
+args=""
+for a in "$@"; do case "$a" in --target=*) ;; *) args="$args \"$(printf "%s" "$a" | sed "s/\"/\\\"/g")\"" ;; esac; done
+eval "set -- $args"
+exec zig cc -target aarch64-linux-musl "$@"

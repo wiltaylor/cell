@@ -1,0 +1,15 @@
+#!/bin/sh
+# C compiler for the musl launcher target. zig ships a musl toolchain, so
+# the zstd C sources link into the static launcher without a musl-gcc.
+# cc-rs passes `--target=x86_64-unknown-linux-musl`, which zig rejects, so
+# the wrapper drops it and supplies zig's own target spelling.
+set -e
+args=""
+for a in "$@"; do
+  case "$a" in
+    --target=*) ;;
+    *) args="$args \"$(printf '%s' "$a" | sed 's/"/\\"/g')\"" ;;
+  esac
+done
+eval "set -- $args"
+exec zig cc -target x86_64-linux-musl "$@"

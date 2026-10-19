@@ -1,0 +1,48 @@
+import <cell.wcl>
+
+// Chocolate Doom (Windows build) with the Freedoom data, run through Wine.
+app "dev.wiltaylor.wine-doom" {
+  name    = "Chocolate Doom (Wine)"
+  version = "3.1.0"
+
+  runtime {
+    base     = "oci://archlinux:base"
+    multilib = true
+    packages = [
+      "wine", "wine-mono",
+      "mesa", "lib32-mesa", "vulkan-icd-loader", "lib32-vulkan-icd-loader",
+      "vulkan-intel", "lib32-vulkan-intel", "vulkan-radeon", "lib32-vulkan-radeon",
+      "libpulse", "lib32-libpulse", "pipewire", "lib32-pipewire",
+      "lib32-gnutls", "lib32-libxcomposite", "lib32-libxinerama", "lib32-libxrandr",
+      "lib32-libxcursor", "lib32-libxi", "lib32-alsa-plugins",
+      "ttf-dejavu", "mesa-utils", "vulkan-tools",
+    ]
+  }
+
+  build {
+    copy { from = "./dist/chocolate-doom" to = "/app/chocolate-doom" }
+    copy { from = "./dist/freedoom" to = "/app/freedoom" }
+  }
+
+  entry {
+    exec = ["wine", "/app/chocolate-doom/chocolate-doom.exe", "-iwad", "/app/freedoom/freedoom1.wad", "-window"]
+    cwd  = "/app/chocolate-doom"
+    env "WINEDEBUG" { value = "-all" }
+    command "winemine" { exec = ["wine", "winemine"] }
+    command "winecfg"  { exec = ["wine", "winecfg"] }
+    command "glxinfo"  { exec = ["glxinfo", "-B"] }
+  }
+
+  isolation {
+    network = false
+    home    = :private
+  }
+
+  integration {
+    display = [:x11, :wayland]
+    audio   = [:pipewire, :pulse]
+    input   = [:gamepad]
+    fonts   = true
+    gpu { enable = true nvidia = :auto }
+  }
+}

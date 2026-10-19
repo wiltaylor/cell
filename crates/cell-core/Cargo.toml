@@ -1,0 +1,16 @@
+[package]
+name = "cell-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Shared pieces of the Cell portable application format: file layout, manifest, squashfs reader, FUSE server and sandbox."
+
+[dependencies]
+anyhow.workspace = true
+libc.workspace = true
+serde.workspace = true
+ciborium.workspace = true
+blake3.workspace = true
+fuser.workspace = true
+zstd.workspace = true
+flate2.workspace = true

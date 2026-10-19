@@ -1,0 +1,46 @@
+import <cell.wcl>
+
+// Extreme Tux Racer from the Arch repositories, with Mesa, the Vulkan
+// loader and the usual GPU test tools in the runtime.
+app "dev.wiltaylor.tuxracer" {
+  name    = "Extreme Tux Racer"
+  version = "0.8.4"
+
+  runtime {
+    base     = "oci://archlinux:base"
+    packages = [
+      "mesa", "vulkan-icd-loader", "vulkan-intel", "vulkan-radeon", "vulkan-swrast",
+      "libva-mesa-driver", "mesa-utils", "vulkan-tools",
+      "libpulse", "pipewire", "libxkbcommon-x11", "glu", "freetype2", "sfml",
+    ]
+    // Extreme Tux Racer is not in the plain Arch repositories. The CachyOS
+    // repository carries a generic x86_64 build, so the setup step installs
+    // that one package; pacman resolves its dependencies from Arch.
+    setup = [
+      "pacman -Sy --noconfirm && curl -L --fail -o /root/etr.pkg.tar.zst https://cdn77.cachyos.org/repo/x86_64/cachyos/extremetuxracer-0.8.4-4-x86_64.pkg.tar.zst && pacman -U --noconfirm /root/etr.pkg.tar.zst && rm /root/etr.pkg.tar.zst",
+    ]
+  }
+
+  entry {
+    exec = ["etr"]
+    command "glxinfo"  { exec = ["glxinfo", "-B"] }
+    command "glxgears" { exec = ["glxgears"] }
+    command "vkcube"   { exec = ["vkcube"] }
+    command "vulkaninfo" { exec = ["vulkaninfo", "--summary"] }
+    command "eglinfo"  { exec = ["eglinfo", "-B"] }
+  }
+
+  isolation {
+    network = false
+    home    = :private
+  }
+
+  integration {
+    // SFML 2 is X11 only, so the game runs through Xwayland.
+    display = [:x11, :wayland]
+    audio   = [:pipewire, :pulse]
+    input   = [:gamepad]
+    fonts   = true
+    gpu { enable = true nvidia = :auto }
+  }
+}

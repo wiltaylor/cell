@@ -1,0 +1,177 @@
+// cell.wcl schema — the surface of a Cell build file.
+//
+// A build file opts in with `import <cell.wcl>` at the top. WCL rejects an
+// unknown block or field; `cell validate` applies the rules the schema
+// cannot express (paths exist, lists agree, and so on).
+
+// The exact set of values a stringly-typed field accepts.
+@decorator("options")
+@applies_to(on = [:type_field])
+type FieldOptions {
+  @inline(0) values: list<utf8>
+}
+
+symbol_set Placement   { embedded sidecar }
+symbol_set Compression { zstd raw }
+symbol_set HomeMode    { private portable host }
+symbol_set PidMode     { private host }
+symbol_set Display     { wayland x11 x11_fallback }
+symbol_set Audio       { pipewire pulse alsa }
+symbol_set Input       { gamepad uinput }
+symbol_set Dbus        { off session }
+symbol_set Nvidia      { auto fetch host off }
+symbol_set BindKind    { ro rw dev }
+
+@document
+type CellDoc {
+  @children("app")      apps:      list<App>
+  @children("template") templates: list<Template>
+}
+
+@block("app")
+type App {
+  @doc("Reverse-DNS app id; names the state directory and the desktop entry")
+  @inline(0) id: utf8
+  @doc("Human name")
+  name: utf8?
+  @doc("Version string")
+  version: utf8?
+  @doc("CPU architecture of the payload")
+  @options(["x86_64", "aarch64"]) arch: utf8?
+  @doc("Name of a template block whose settings this app starts from")
+  template: utf8?
+  @child("runtime")     runtime:     Runtime?
+  @child("build")       build:       Build?
+  @children("layer")    layers:      list<Layer>
+  @child("entry")       entry:       Entry?
+  @child("isolation")   isolation:   Isolation?
+  @child("integration") integration: Integration?
+}
+
+@block("template")
+type Template {
+  @inline(0) name: utf8
+  @child("runtime")     runtime:     Runtime?
+  @child("build")       build:       Build?
+  @child("entry")       entry:       Entry?
+  @child("isolation")   isolation:   Isolation?
+  @child("integration") integration: Integration?
+}
+
+@block("runtime")
+type Runtime {
+  @doc("Base system: oci://image, tar://path-or-url, or dir://path")
+  base: utf8
+  @doc("Install 32-bit libraries too (Wine needs this)")
+  @default(false) multilib: bool?
+  @doc("Where the runtime layer lives: embedded in the file or beside it")
+  @default(:embedded) placement: Placement?
+  @doc("Packages installed with the base's own package manager")
+  packages: list<utf8>?
+  @doc("Shell commands run as root before the packages install")
+  setup: list<utf8>?
+}
+
+@block("build")
+type Build {
+  @children("copy") copies: list<Copy>
+  @children("run")  runs:   list<Run>
+}
+
+@block("copy")
+type Copy {
+  @doc("Host path, relative to the build file")
+  from: utf8
+  @doc("Path inside the image")
+  to: utf8
+}
+
+@block("run")
+type Run {
+  @doc("Shell command run as root inside the image")
+  @inline(0) command: utf8
+}
+
+@block("layer")
+type Layer {
+  @inline(0) name: utf8
+  @doc("Host directory, relative to the build file")
+  source: utf8
+  @doc("Mount path inside the sandbox")
+  mount: utf8
+  @default(:zstd) compression: Compression?
+  @default(:embedded) placement: Placement?
+}
+
+@block("entry")
+type Entry {
+  @doc("Command and arguments")
+  exec: list<utf8>
+  @doc("Working directory inside the sandbox")
+  cwd: utf8?
+  @doc("Wrap the command in gamescope")
+  @default(false) gamescope: bool?
+  @children("env")     envs:     list<EnvVar>
+  @children("command") commands: list<NamedCommand>
+}
+
+@block("env")
+type EnvVar {
+  @inline(0) name: utf8
+  value: utf8
+}
+
+@block("command")
+type NamedCommand {
+  @inline(0) name: utf8
+  exec: list<utf8>
+}
+
+@block("isolation")
+type Isolation {
+  @doc("Share the host network namespace")
+  @default(false) network: bool?
+  @doc("private: per-app home in XDG_DATA_HOME; portable: beside the file; host: the real home")
+  @default(:private) home: HomeMode?
+  @default(:private) pid: PidMode?
+  @doc("Share /dev/shm with the host")
+  @default(false) shm: bool?
+  @children("bind") binds: list<Bind>
+}
+
+@block("bind")
+type Bind {
+  @inline(0) kind: BindKind
+  host: utf8
+  guest: utf8
+  @default(true) optional: bool?
+}
+
+@block("integration")
+type Integration {
+  display: list<Display>?
+  audio:   list<Audio>?
+  input:   list<Input>?
+  @default(:off) dbus: Dbus?
+  @doc("Expose host fonts under /run/host")
+  @default(false) fonts: bool?
+  @doc("Expose host icon and cursor themes under /run/host")
+  @default(false) themes: bool?
+  @child("gpu")     gpu:     Gpu?
+  @child("desktop") desktop: DesktopEntry?
+}
+
+@block("gpu")
+type Gpu {
+  @default(true)  enable: bool?
+  @default(:auto) nvidia: Nvidia?
+  @default(true)  vaapi:  bool?
+}
+
+@block("desktop")
+type DesktopEntry {
+  @doc("PNG icon, relative to the build file")
+  icon: utf8?
+  categories: list<utf8>?
+  mime: list<utf8>?
+}

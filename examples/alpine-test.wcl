@@ -1,0 +1,10 @@
+import <cell.wcl>
+app "dev.wiltaylor.alpine-test" {
+  name = "Alpine test"
+  version = "0.1"
+  runtime { base = "oci://alpine:3.22" packages = ["bash"] }
+  build { run "echo hello-from-build > /etc/cell-build-marker" { } }
+  entry { exec = ["/bin/sh", "-c", "cat /etc/os-release /etc/cell-build-marker; id; ls /; mount | head -20; ls -la /dev /run/user/*"] }
+  isolation { network = false }
+  integration { display = [:wayland] gpu { enable = false } }
+}

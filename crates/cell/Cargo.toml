@@ -1,0 +1,22 @@
+[package]
+name = "cell"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Build tool: turns a cell.wcl file into a .cell portable application."
+
+[[bin]]
+name = "cell"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+libc.workspace = true
+serde.workspace = true
+ciborium.workspace = true
+blake3.workspace = true
+cell-core = { path = "../cell-core" }
+wcl_lang = { path = "/home/wil/dev/WCL/crates/wcl_lang" }
+tar = "0.4"
+zstd.workspace = true
+flate2.workspace = true

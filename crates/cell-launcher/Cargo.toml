@@ -1,0 +1,16 @@
+[package]
+name = "cell-launcher"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "The static launcher that heads every .cell file."
+
+[[bin]]
+name = "cell-launcher"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+libc.workspace = true
+cell-core = { path = "../cell-core" }
+blake3.workspace = true
