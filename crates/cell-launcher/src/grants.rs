@@ -7,6 +7,7 @@ use anyhow::Result;
 use cell_core::format::{
     Audio, BindMode, Dbus, Display, HomeMode, Input, Manifest, NvidiaMode, PidMode,
 };
+use cell_core::gpu::DriverDir;
 use cell_core::host::HostProbe;
 use cell_core::sandbox::{BindSpec, Spec};
 
@@ -269,6 +270,7 @@ pub fn build_spec(
             Some("host") => NvidiaMode::Host,
             Some("none") => NvidiaMode::None,
             Some("fetch") => NvidiaMode::Fetch,
+            Some("auto") => NvidiaMode::Auto,
             _ => m.integration.gpu.nvidia,
         };
         if let Some(ver) = &host.nvidia_version {
@@ -277,7 +279,9 @@ pub fn build_spec(
                     let n = d.file_name().unwrap().to_string_lossy().to_string();
                     bind(&mut spec, d, format!("/dev/{n}"), BindMode::Dev);
                 }
-                nvidia_host(&mut spec, ver, &mut report);
+                if let Some(src) = nvidia_source(nvidia_mode, ver, &mut report) {
+                    nvidia_userspace(&mut spec, ver, &src, &mut report);
+                }
             }
         }
     }
@@ -308,34 +312,127 @@ pub fn build_spec(
     (spec, GrantReport { lines: report })
 }
 
-/// Bind the host NVIDIA userspace and regenerate `ld.so.cache` inside.
-fn nvidia_host(spec: &mut Spec, version: &str, report: &mut Vec<String>) {
-    let dirs = cell_core::gpu::find_host_driver_dirs();
-    if dirs.is_empty() {
-        report.push(format!(
-            "gpu: nvidia kernel module {version} loaded but no host userspace found"
-        ));
-        return;
+/// Where the NVIDIA userspace libraries come from.
+enum NvidiaSource {
+    /// Host directories, bound under `/run/host`.
+    Host(Vec<DriverDir>),
+    /// The fetch cache, bound at `/run/cell/gpu/fetched`.
+    Fetched {
+        cache: PathBuf,
+        dirs: Vec<DriverDir>,
+    },
+}
+
+/// Pick the library source for `mode`. `:fetch` uses the cache only.
+/// `:auto` tries the cache and the download first, then the host.
+/// `:host` uses the host only. `None` means no userspace was found; the
+/// report says why.
+fn nvidia_source(mode: NvidiaMode, version: &str, report: &mut Vec<String>) -> Option<NvidiaSource> {
+    let fetched = |report: &mut Vec<String>| match cell_core::nvidia_fetch::fetch(version) {
+        Ok(d) => {
+            let dirs = cell_core::gpu::fetched_driver_dirs(&d.dir);
+            if dirs.is_empty() {
+                report.push(format!(
+                    "gpu: nvidia {version} cache {} holds no libraries",
+                    d.dir.display()
+                ));
+                None
+            } else {
+                Some(NvidiaSource::Fetched { cache: d.dir, dirs })
+            }
+        }
+        Err(e) => {
+            eprintln!("cell: nvidia: fetch of driver {version} failed: {e:#}");
+            report.push(format!("gpu: nvidia {version} fetch failed: {e:#}"));
+            None
+        }
+    };
+    let host = |report: &mut Vec<String>| {
+        let dirs = cell_core::gpu::find_host_driver_dirs();
+        if dirs.is_empty() {
+            report.push(format!(
+                "gpu: nvidia kernel module {version} loaded but no host userspace found"
+            ));
+            None
+        } else {
+            Some(NvidiaSource::Host(dirs))
+        }
+    };
+    match mode {
+        NvidiaMode::None => None,
+        NvidiaMode::Fetch => fetched(report),
+        NvidiaMode::Host => host(report),
+        NvidiaMode::Auto => fetched(report).or_else(|| {
+            eprintln!("cell: nvidia: falling back to the host libraries");
+            host(report).or_else(|| {
+                eprintln!(
+                    "cell: warning: nvidia {version}: no fetched or host userspace; \
+                     the NVIDIA GPU is not usable in this sandbox"
+                );
+                None
+            })
+        }),
+    }
+}
+
+/// Bind the NVIDIA userspace from `src`, build the symlink farm under
+/// `/run/cell/gpu/lib{,32}`, write the loader JSON files and regenerate
+/// `ld.so.cache` inside the sandbox.
+fn nvidia_userspace(spec: &mut Spec, version: &str, src: &NvidiaSource, report: &mut Vec<String>) {
+    // (bound directory in the guest, libraries, 32-bit) for each source dir.
+    let mut guest_dirs: Vec<(String, &DriverDir)> = Vec::new();
+    let mut gbm_dir = None;
+    let mut vdpau_dir = None;
+    match src {
+        NvidiaSource::Host(dirs) => {
+            for d in dirs {
+                let guest = if d.lib32 { "/run/host/lib32" } else { "/run/host/lib" };
+                bind(spec, &d.dir, guest, BindMode::Ro);
+                guest_dirs.push((guest.to_string(), d));
+                report.push(format!(
+                    "gpu: nvidia {version} userspace from host {} ({} libs)",
+                    d.dir.display(),
+                    d.libs.len()
+                ));
+            }
+            for (host_path, rel) in cell_core::gpu::host_extra_files() {
+                bind(spec, host_path, format!("/run/cell/gpu/extra/{rel}"), BindMode::Ro);
+                if rel.starts_with("gbm/") {
+                    gbm_dir = Some("/run/cell/gpu/extra/gbm".to_string());
+                } else if rel.starts_with("vdpau/") {
+                    vdpau_dir = Some("/run/cell/gpu/extra/vdpau".to_string());
+                }
+            }
+        }
+        NvidiaSource::Fetched { cache, dirs } => {
+            let fetched = "/run/cell/gpu/fetched";
+            bind(spec, cache, fetched, BindMode::Ro);
+            for d in dirs {
+                let guest = format!("{fetched}/{}", if d.lib32 { "lib32" } else { "lib" });
+                guest_dirs.push((guest, d));
+            }
+            if cache.join("lib/gbm/nvidia-drm_gbm.so").exists() {
+                gbm_dir = Some(format!("{fetched}/lib/gbm"));
+            }
+            if cache.join("lib/vdpau").exists() {
+                vdpau_dir = Some(format!("{fetched}/lib/vdpau"));
+            }
+            report.push(format!(
+                "gpu: nvidia {version} userspace fetched from NVIDIA (cache {}, {} libs)",
+                cache.display(),
+                dirs.iter().map(|d| d.libs.len()).sum::<usize>()
+            ));
+        }
     }
     let mut ld_conf = String::from("include /etc/ld.so.conf.d/*.conf\n");
-    for d in &dirs {
-        let host_dir = if d.lib32 { "/run/host/lib32" } else { "/run/host/lib" };
+    for (guest, d) in &guest_dirs {
         let gpu_dir = if d.lib32 { "/run/cell/gpu/lib32" } else { "/run/cell/gpu/lib" };
-        bind(spec, &d.dir, host_dir, BindMode::Ro);
         for lib in &d.libs {
             spec.symlinks
-                .push((format!("{gpu_dir}/{lib}"), format!("{host_dir}/{lib}")));
+                .push((format!("{gpu_dir}/{lib}"), format!("{guest}/{lib}")));
         }
         ld_conf.push_str(gpu_dir);
         ld_conf.push('\n');
-        report.push(format!(
-            "gpu: nvidia {version} userspace from {} ({} libs)",
-            d.dir.display(),
-            d.libs.len()
-        ));
-    }
-    for (host_path, rel) in cell_core::gpu::host_extra_files() {
-        bind(spec, host_path, format!("/run/cell/gpu/extra/{rel}"), BindMode::Ro);
     }
     let share = "/run/cell/gpu/share";
     spec.files.push((
@@ -380,7 +477,10 @@ fn nvidia_host(spec: &mut Spec, version: &str, report: &mut Vec<String>) {
         "__EGL_EXTERNAL_PLATFORM_CONFIG_DIRS",
         format!("{share}/egl/egl_external_platform.d:/usr/share/egl/egl_external_platform.d"),
     );
-    if Path::new("/run/cell/gpu/extra/gbm").exists() || true {
-        env(spec, "GBM_BACKENDS_PATH", "/run/cell/gpu/extra/gbm:/usr/lib/gbm");
+    if let Some(g) = gbm_dir {
+        env(spec, "GBM_BACKENDS_PATH", format!("{g}:/usr/lib/gbm"));
+    }
+    if let Some(v) = vdpau_dir {
+        env(spec, "VDPAU_DRIVER_PATH", v);
     }
 }

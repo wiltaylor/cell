@@ -1,5 +1,7 @@
-//! NVIDIA driver discovery on the host. Mesa needs nothing from the host;
-//! the proprietary NVIDIA userspace must match the loaded kernel module.
+//! NVIDIA driver discovery. Mesa needs nothing from the host; the
+//! proprietary NVIDIA userspace must match the loaded kernel module. The
+//! libraries come from the host (`:host`) or from the cache that
+//! [`crate::nvidia_fetch`] fills (`:fetch`). Both give [`DriverDir`]s.
 
 use std::path::{Path, PathBuf};
 
@@ -18,9 +20,15 @@ const NVIDIA_PREFIXES: &[&str] = &[
     "libnvidia-vulkan-producer.",
 ];
 
+/// Whether `name` is a library file of the NVIDIA userspace driver.
+pub fn is_nvidia_lib(name: &str) -> bool {
+    NVIDIA_PREFIXES.iter().any(|p| name.starts_with(p)) && name.contains(".so")
+}
+
+/// A directory of NVIDIA libraries, on the host or in the fetch cache.
 #[derive(Debug, Clone)]
-pub struct HostDriverDir {
-    /// Host directory that holds the libraries.
+pub struct DriverDir {
+    /// Directory that holds the libraries.
     pub dir: PathBuf,
     /// Library file names found in it.
     pub libs: Vec<String>,
@@ -28,14 +36,15 @@ pub struct HostDriverDir {
     pub lib32: bool,
 }
 
-fn scan(dir: &Path) -> Vec<String> {
+/// The NVIDIA library names in `dir`, sorted.
+pub fn scan_driver_dir(dir: &Path) -> Vec<String> {
     let mut out = Vec::new();
     let Ok(rd) = std::fs::read_dir(dir) else {
         return out;
     };
     for e in rd.flatten() {
         let name = e.file_name().to_string_lossy().to_string();
-        if NVIDIA_PREFIXES.iter().any(|p| name.starts_with(p)) && name.contains(".so") {
+        if is_nvidia_lib(&name) {
             out.push(name);
         }
     }
@@ -43,9 +52,23 @@ fn scan(dir: &Path) -> Vec<String> {
     out
 }
 
+/// The `lib/` and `lib32/` directories of a fetch cache that hold
+/// libraries.
+pub fn fetched_driver_dirs(cache: &Path) -> Vec<DriverDir> {
+    let mut out = Vec::new();
+    for (sub, lib32) in [("lib", false), ("lib32", true)] {
+        let dir = cache.join(sub);
+        let libs = scan_driver_dir(&dir);
+        if !libs.is_empty() {
+            out.push(DriverDir { dir, libs, lib32 });
+        }
+    }
+    out
+}
+
 /// Find host NVIDIA library directories. NixOS first, then the FHS
 /// directories of the common distributions.
-pub fn find_host_driver_dirs() -> Vec<HostDriverDir> {
+pub fn find_host_driver_dirs() -> Vec<DriverDir> {
     let candidates64 = [
         "/run/opengl-driver/lib",
         "/usr/lib/x86_64-linux-gnu",
@@ -63,9 +86,9 @@ pub fn find_host_driver_dirs() -> Vec<HostDriverDir> {
     for (list, lib32) in [(candidates64.as_slice(), false), (candidates32.as_slice(), true)] {
         for c in list {
             let p = Path::new(c);
-            let libs = scan(p);
+            let libs = scan_driver_dir(p);
             if !libs.is_empty() {
-                out.push(HostDriverDir {
+                out.push(DriverDir {
                     dir: p.to_path_buf(),
                     libs,
                     lib32,
