@@ -84,13 +84,18 @@ fn real_main() -> Result<i32> {
             host.nvidia_version
         );
         for l in &m.layers {
+            let found = match cell.layer_location(l) {
+                Ok((p, _)) => p.display().to_string(),
+                Err(e) => format!("MISSING: {e}"),
+            };
             println!(
-                "layer: {} ({:?}) at {} size {} MiB {:?}",
+                "layer: {} ({:?}) at {} size {} MiB {:?} -> {}",
                 l.name,
                 l.role,
                 l.mount,
                 l.size / (1024 * 1024),
-                l.placement
+                l.placement,
+                found
             );
         }
         for line in &report.lines {
@@ -106,7 +111,7 @@ fn real_main() -> Result<i32> {
 
     // Layers.
     for l in &m.layers {
-        let (file_path, off) = cell.layer_location(l);
+        let (file_path, off) = cell.layer_location(l)?;
         let file = std::fs::File::open(&file_path)
             .with_context(|| format!("open layer {} at {}", l.name, file_path.display()))?;
         let mount = match l.role {
@@ -159,7 +164,7 @@ fn verify(cell: &CellFile) -> Result<i32> {
     use std::io::Read;
     let mut bad = 0;
     for l in &cell.manifest.layers {
-        let (p, off) = cell.layer_location(l);
+        let (p, off) = cell.layer_location(l)?;
         let mut f = std::fs::File::open(&p)?;
         use std::io::{Seek, SeekFrom};
         f.seek(SeekFrom::Start(off))?;

@@ -13,7 +13,7 @@ use cell_core::format::{
 };
 use cell_core::sandbox::{self, BindSpec, Layer, LayerSource, Spec};
 
-use crate::model::{BuildStep, Plan};
+use crate::model::{BuildStep, Plan, PlacementKind};
 use crate::unpack;
 
 pub struct Options {
@@ -388,22 +388,43 @@ fn assemble(
         s.push(".d");
         PathBuf::from(s)
     };
+    let out_dir = opts
+        .out
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| PathBuf::from("."));
     let mut layers = Vec::new();
     let mut place = |out: &mut fs::File,
                      name: &str,
                      role: LayerRole,
                      mount: &str,
                      src: &Path,
-                     sidecar: bool|
+                     kind: PlacementKind|
      -> Result<()> {
         let (hash, size) = blake3_file(src)?;
-        let (placement, offset) = if sidecar {
-            fs::create_dir_all(&sidecar_dir)?;
-            let file = format!("{name}.layer");
-            fs::copy(src, sidecar_dir.join(&file))?;
-            (Placement::Sidecar { file }, 0)
-        } else {
-            (Placement::Embedded, append_aligned(out, src)?)
+        let (placement, offset) = match kind {
+            PlacementKind::Sidecar => {
+                fs::create_dir_all(&sidecar_dir)?;
+                let file = format!("{name}.layer");
+                fs::copy(src, sidecar_dir.join(&file))?;
+                (Placement::Sidecar { file }, 0)
+            }
+            PlacementKind::Referenced => {
+                // Content-addressed and shared: a second cell in the same
+                // directory with the same layer bytes reuses the file.
+                let file = format::referenced_file_name(name, &hash);
+                let dest = out_dir.join(&file);
+                if dest.is_file() && fs::metadata(&dest)?.len() == size {
+                    status(&format!("layer {name}: {file} already beside the output, shared"));
+                } else {
+                    let tmp = out_dir.join(format!("{file}.partial"));
+                    fs::copy(src, &tmp)?;
+                    fs::rename(&tmp, &dest)?;
+                    status(&format!("layer {name}: written as {file} beside the output"));
+                }
+                (Placement::Referenced { file }, 0)
+            }
+            PlacementKind::Embedded => (Placement::Embedded, append_aligned(out, src)?),
         };
         layers.push(LayerMeta {
             name: name.to_string(),
@@ -416,10 +437,10 @@ fn assemble(
         });
         Ok(())
     };
-    place(&mut out, "runtime", LayerRole::Runtime, "/", runtime_sqfs, plan.runtime.sidecar)?;
-    place(&mut out, "app", LayerRole::App, "/", app_sqfs, false)?;
+    place(&mut out, "runtime", LayerRole::Runtime, "/", runtime_sqfs, plan.runtime.placement)?;
+    place(&mut out, "app", LayerRole::App, "/", app_sqfs, PlacementKind::Embedded)?;
     for (l, p) in data {
-        place(&mut out, &l.name, LayerRole::Data, &l.mount, p, l.sidecar)?;
+        place(&mut out, &l.name, LayerRole::Data, &l.mount, p, l.placement)?;
     }
     let manifest = Manifest {
         format_version: FORMAT_VERSION,

@@ -29,17 +29,18 @@ workspace-check:
 example-validate name: tool-build
 	./target/release/cell validate examples/{{name}}/cell.wcl
 
-# Build one example into examples/<name>/<name>.cell
+# Build one example into examples/dist/<name>.cell (referenced layers are shared there)
 [group('example')]
 example-build name: all-build
-	cd examples/{{name}} && ../../target/release/cell build cell.wcl -o {{name}}.cell
+	mkdir -p examples/dist
+	cd examples/{{name}} && ../../target/release/cell build cell.wcl -o ../dist/{{name}}.cell
 
-# Show the host probe and grants of a built example
+# Show the host probe, grants and layer files of a built example
 [group('example')]
 example-info name:
-	CELL_CMD=info ./examples/{{name}}/{{name}}.cell
+	CELL_CMD=info ./examples/dist/{{name}}.cell
 
 # Run a built example
 [group('example')]
 example-run name *args:
-	./examples/{{name}}/{{name}}.cell {{args}}
+	./examples/dist/{{name}}.cell {{args}}

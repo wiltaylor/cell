@@ -53,6 +53,15 @@ CELL_COMMAND=glxinfo ./app.cell # run a named alternative command
 CELL_NVIDIA=host ./app.cell     # force one NVIDIA strategy (host, fetch, none)
 ```
 
+A layer can be `:embedded` in the file, a `:sidecar` in `<name>.cell.d/`,
+or `:referenced`: a content-addressed `runtime-<hash>.layer` file beside
+the cell. Cells built into one directory with the same runtime share that
+one file; `examples/dist/` holds `tuxracer.cell` and `gl-tools.cell` at
+3 MiB each on top of one 268 MiB runtime. The launcher looks for a
+referenced layer in `CELL_LAYER_PATH`, the cell's directory,
+`<name>.cell.d/`, `~/.local/share/cell/layers` and `~/.cache/cell/layers`,
+and names the file and every directory it tried when it is missing.
+
 Writable state lives in `$XDG_DATA_HOME/cell/apps/<id>/`: an overlay upper
 directory for everything the app writes outside its home, and `home/` which
 is bound at the real `$HOME` path. `home = :portable` moves that beside the
@@ -65,7 +74,7 @@ crates/cell-core      file format, squashfs reader, FUSE server, sandbox
 crates/cell-launcher  the static launcher (musl)
 crates/cell           the build tool (reads cell.wcl)
 schema/cell.wcl       the WCL schema for build files
-examples/             alpine-test, tuxracer, wine-doom
+examples/             alpine-test, tuxracer, gl-tools, wine-doom; built into examples/dist/
 tools/musl-cc         zig wrapper used as the musl C compiler
 ```
 
@@ -88,8 +97,9 @@ RTX 4060 with driver 615.71.09.
 | Example | Size | Result |
 | --- | --- | --- |
 | `examples/alpine-test` | 5 MiB | Entry point runs as the real user; FUSE layers, overlay, private `/dev`, `/tmp`, `/run` |
-| `examples/tuxracer` | 269 MiB | OpenGL 4.6 and Vulkan 1.4 on Intel through the runtime's Mesa; NVIDIA through the fetched 615.71.09 userspace (17 s first run) and through host libraries; a full race renders at 2560x1600; an audio stream reaches the host |
-| `examples/wine-doom` | 766 MiB | Wine prefix created on first run; Minesweeper and Chocolate Doom (Freedoom) run through Wine with wined3d and DirectSound audio |
+| `examples/tuxracer` | 3 MiB + 268 MiB shared runtime | OpenGL 4.6 and Vulkan 1.4 on Intel through the runtime's Mesa; NVIDIA through the fetched 615.71.09 userspace (17 s first run) and through host libraries; a full race renders at 2560x1600; an audio stream reaches the host |
+| `examples/gl-tools` | 3 MiB + the same runtime | glxinfo, vulkaninfo, vkcube and eglinfo on the runtime file Tux Racer uses |
+| `examples/wine-doom` | 767 MiB | Wine prefix created on first run; Minesweeper and Chocolate Doom (Freedoom) run through Wine with wined3d and DirectSound audio |
 
 Notes:
 

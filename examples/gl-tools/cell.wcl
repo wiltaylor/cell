@@ -1,0 +1,37 @@
+import <cell.wcl>
+
+// GPU diagnostics on the same runtime as Tux Racer. Both cells declare
+// `placement = :referenced`, so when they are built into one directory
+// they share a single `runtime-<hash>.layer` file.
+app "dev.wiltaylor.gl-tools" {
+  name    = "GL tools"
+  version = "1.0"
+
+  runtime {
+    base      = "oci://archlinux:base"
+    placement = :referenced
+    packages  = [
+      "mesa", "vulkan-icd-loader", "vulkan-intel", "vulkan-radeon", "vulkan-swrast",
+      "libva-mesa-driver", "mesa-utils", "vulkan-tools",
+      "libpulse", "pipewire", "libxkbcommon-x11", "glu", "freetype2", "sfml",
+    ]
+    setup = [
+      "pacman -Sy --noconfirm && curl -L --fail -o /root/etr.pkg.tar.zst https://cdn77.cachyos.org/repo/x86_64/cachyos/extremetuxracer-0.8.4-4-x86_64.pkg.tar.zst && pacman -U --noconfirm /root/etr.pkg.tar.zst && rm /root/etr.pkg.tar.zst",
+    ]
+  }
+
+  entry {
+    exec = ["glxinfo", "-B"]
+    command "glxgears"   { exec = ["glxgears"] }
+    command "vkcube"     { exec = ["vkcube"] }
+    command "vulkaninfo" { exec = ["vulkaninfo", "--summary"] }
+    command "eglinfo"    { exec = ["eglinfo", "-B"] }
+  }
+
+  isolation { network = false }
+
+  integration {
+    display = [:x11, :wayland]
+    gpu { enable = true nvidia = :auto }
+  }
+}

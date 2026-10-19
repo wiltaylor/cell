@@ -73,6 +73,17 @@ pub enum Placement {
     Embedded,
     /// A file beside the `.cell`, in `<name>.cell.d/<file>`.
     Sidecar { file: String },
+    /// A content-addressed file, `<layer>-<hash16>.layer`, that lives in
+    /// the cell's directory and can be shared by every cell there. The
+    /// launcher also looks in `CELL_LAYER_PATH`, `<name>.cell.d/`,
+    /// `$XDG_DATA_HOME/cell/layers` and `$XDG_CACHE_HOME/cell/layers`.
+    Referenced { file: String },
+}
+
+/// The file name of a referenced layer: the layer name plus the first 16
+/// hex digits of its BLAKE3 hash.
+pub fn referenced_file_name(layer_name: &str, blake3_hex: &str) -> String {
+    format!("{layer_name}-{}.layer", &blake3_hex[..16.min(blake3_hex.len())])
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -295,12 +306,49 @@ impl CellFile {
         })
     }
 
-    /// Where a layer's bytes live: (file path, offset).
-    pub fn layer_location(&self, layer: &LayerMeta) -> (std::path::PathBuf, u64) {
+    /// Where a layer's bytes live: (file path, offset). A referenced layer
+    /// is searched for; a missing one is an error that names every
+    /// directory that was tried.
+    pub fn layer_location(&self, layer: &LayerMeta) -> Result<(std::path::PathBuf, u64)> {
         match &layer.placement {
-            Placement::Embedded => (self.path.clone(), layer.offset),
-            Placement::Sidecar { file } => (self.sidecar_dir().join(file), layer.offset),
+            Placement::Embedded => Ok((self.path.clone(), layer.offset)),
+            Placement::Sidecar { file } => Ok((self.sidecar_dir().join(file), layer.offset)),
+            Placement::Referenced { file } => {
+                let dirs = self.referenced_search_dirs();
+                for d in &dirs {
+                    let p = d.join(file);
+                    if p.is_file() {
+                        return Ok((p, layer.offset));
+                    }
+                }
+                let list: Vec<String> = dirs.iter().map(|d| format!("  {}", d.display())).collect();
+                bail!(
+                    "layer `{}` is referenced, not embedded: put `{}` ({} MiB) beside this cell. \
+                     Searched:\n{}",
+                    layer.name,
+                    file,
+                    layer.size / (1024 * 1024),
+                    list.join("\n")
+                )
+            }
         }
+    }
+
+    /// Directories searched for referenced layers, in order.
+    pub fn referenced_search_dirs(&self) -> Vec<std::path::PathBuf> {
+        let mut dirs = Vec::new();
+        if let Ok(v) = std::env::var("CELL_LAYER_PATH") {
+            for d in v.split(':').filter(|d| !d.is_empty()) {
+                dirs.push(std::path::PathBuf::from(d));
+            }
+        }
+        if let Some(parent) = self.path.parent() {
+            dirs.push(parent.to_path_buf());
+        }
+        dirs.push(self.sidecar_dir());
+        dirs.push(crate::host::data_home().join("layers"));
+        dirs.push(crate::host::cache_home().join("layers"));
+        dirs
     }
 
     /// `<name>.cell.d` beside the file.

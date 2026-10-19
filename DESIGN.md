@@ -116,10 +116,13 @@ Known host problems the launcher must detect and explain:
   `MyGame.cell.d/assets.layer`. The launcher resolves sidecars relative to the
   main file. Sidecars keep the main file under the 4 GiB FAT32 limit and let a
   publisher ship a small update without reshipping the assets.
-- A runtime layer can be `embedded` or `referenced`. A referenced runtime is
-  not in the file. The manifest records its hash and one or more URLs. The
-  launcher fetches it once into `$XDG_CACHE_HOME/cell/layers/<hash>` and
-  shares it between every `.cell` that references it. This is optional. The
+- A layer can be `embedded`, `sidecar` or `referenced`. A referenced layer
+  is not in the file. It is a content-addressed file,
+  `<layer>-<hash16>.layer`, beside the cell. Every cell in that directory
+  with the same layer bytes shares the one file. The launcher also searches
+  `CELL_LAYER_PATH`, `<name>.cell.d/`, `$XDG_DATA_HOME/cell/layers` and
+  `$XDG_CACHE_HOME/cell/layers`, so a user can keep one store of runtimes.
+  Fetching a missing referenced layer from a URL is future work. The
   default is embedded, because one file that works offline is the point.
 - The manifest is the compiled form of the WCL file. The launcher parses CBOR,
   not WCL. This keeps the launcher small and keeps the WCL parser in the build
@@ -605,6 +608,10 @@ sections above:
 - **One instance owns the state.** The launcher takes an `flock` on
   `instance.lock` in the state directory. A second instance of the same app
   runs with a throwaway overlay upper and shares the home bind.
+- **`:referenced` layers are files on disk, not downloads.** The build tool
+  writes `<layer>-<hash16>.layer` beside the output and reuses an existing
+  one with the same name. The launcher resolves it through a search path.
+  The name carries the hash; `CELL_CMD=verify` checks the full BLAKE3.
 - **Pid 1 of the sandbox is a small init**, as in bubblewrap. The entry
   point is its child. The init forwards signals, reaps orphans, and waits
   for daemons such as `wineserver` to finish after the entry point exits.

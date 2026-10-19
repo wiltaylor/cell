@@ -7,8 +7,10 @@ app "dev.wiltaylor.tuxracer" {
   version = "0.8.4"
 
   runtime {
-    base     = "oci://archlinux:base"
-    packages = [
+    base      = "oci://archlinux:base"
+    // The runtime is a separate file beside the cell, shared with gl-tools.
+    placement = :referenced
+    packages  = [
       "mesa", "vulkan-icd-loader", "vulkan-intel", "vulkan-radeon", "vulkan-swrast",
       "libva-mesa-driver", "mesa-utils", "vulkan-tools",
       "libpulse", "pipewire", "libxkbcommon-x11", "glu", "freetype2", "sfml",

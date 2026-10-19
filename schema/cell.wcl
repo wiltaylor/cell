@@ -11,7 +11,7 @@ type FieldOptions {
   @inline(0) values: list<utf8>
 }
 
-symbol_set Placement   { embedded sidecar }
+symbol_set Placement   { embedded sidecar referenced }
 symbol_set Compression { zstd raw }
 symbol_set HomeMode    { private portable host }
 symbol_set PidMode     { private host }
@@ -64,7 +64,7 @@ type Runtime {
   base: utf8
   @doc("Install 32-bit libraries too (Wine needs this)")
   @default(false) multilib: bool?
-  @doc("Where the runtime layer lives: embedded in the file or beside it")
+  @doc("embedded: inside the file; sidecar: in <name>.cell.d/; referenced: a content-addressed file beside the cell that other cells can share")
   @default(:embedded) placement: Placement?
   @doc("Packages installed with the base's own package manager")
   packages: list<utf8>?

@@ -11,11 +11,31 @@ use wcl_lang::{disk_loader, Block, Document, Environment, Registry, Value};
 
 pub const SCHEMA: &str = include_str!("../../../schema/cell.wcl");
 
+/// Where a layer goes when the cell is assembled.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PlacementKind {
+    #[default]
+    Embedded,
+    Sidecar,
+    Referenced,
+}
+
+impl PlacementKind {
+    fn parse(s: Option<&str>) -> Result<Self> {
+        Ok(match s {
+            None | Some("embedded") => PlacementKind::Embedded,
+            Some("sidecar") => PlacementKind::Sidecar,
+            Some("referenced") => PlacementKind::Referenced,
+            Some(o) => bail!("placement: unknown {o}"),
+        })
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct RuntimeSpec {
     pub base: String,
     pub multilib: bool,
-    pub sidecar: bool,
+    pub placement: PlacementKind,
     pub packages: Vec<String>,
     pub setup: Vec<String>,
 }
@@ -32,7 +52,7 @@ pub struct DataLayer {
     pub source: PathBuf,
     pub mount: String,
     pub compress: bool,
-    pub sidecar: bool,
+    pub placement: PlacementKind,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -208,7 +228,7 @@ pub fn plan(doc: &Document, root: &Path) -> Result<Plan> {
                 source: root.join(string(&l, "source")?.context("layer.source")?),
                 mount: string(&l, "mount")?.context("layer.mount")?,
                 compress: symbol(&l, "compression")?.as_deref() != Some("raw"),
-                sidecar: symbol(&l, "placement")?.as_deref() == Some("sidecar"),
+                placement: PlacementKind::parse(symbol(&l, "placement")?.as_deref())?,
             });
         }
         if let Some(e) = child(src, "entry") {
@@ -238,7 +258,7 @@ fn read_runtime(b: &Block, r: &mut RuntimeSpec) -> Result<()> {
         r.multilib = m;
     }
     if let Some(p) = symbol(b, "placement")? {
-        r.sidecar = p == "sidecar";
+        r.placement = PlacementKind::parse(Some(&p))?;
     }
     let pk = string_list(b, "packages")?;
     if !pk.is_empty() {

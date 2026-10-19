@@ -1,5 +1,7 @@
 /target
 *.cell
+*.layer
+examples/dist/
 *.cell.d/
 *.cell.partial
 examples/*/build.log
