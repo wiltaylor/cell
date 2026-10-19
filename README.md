@@ -1,140 +1,460 @@
 # Cell
 
-A portable, sandboxed application format for Linux. One `.cell` file holds a
-static launcher, a complete userland with its own glibc, the application, and
-a manifest that says what the application may touch on the host.
+**One file. Any Linux. Sandboxed. GPU included.**
 
-- The launcher is a static musl binary. It runs on any glibc, including NixOS.
-- The application runs in its own user, mount, pid and (optionally) network
-  namespace. Nothing on the host is visible unless the manifest grants it.
-- Wayland, X11, PipeWire, PulseAudio, gamepads, D-Bus and host fonts are
-  grants. OpenGL and Vulkan come from Mesa inside the runtime. The NVIDIA
-  userspace is matched to the host kernel module.
-- Layers are squashfs images mounted lazily over FUSE from inside the user
-  namespace. No `fusermount`, no `bwrap`, no setuid helper, no copy to `/tmp`.
-- A `cell.wcl` file describes the build. `cell build` turns it into a `.cell`.
-
-See `DESIGN.md` for the full design and `schema/cell.wcl` for the build file
-surface.
-
-## Build
+Cell is a portable application format for Linux. A `.cell` file is a static
+launcher with a complete userland, the application and a manifest appended
+to it. Double-click it, or run it from a shell, on any distribution: Arch,
+Debian, Ubuntu, Fedora, Alpine, NixOS. The host's glibc, Mesa and libraries
+never matter, because the file carries its own. The application runs in a
+sandbox and sees nothing on the host that its manifest did not grant.
 
 ```sh
-just all-build
+./tuxracer.cell                 # a full 3D game, Wayland or X11, GPU accelerated
+./wine-doom.cell                # a Windows game through Wine, with sound
+./cell-builder.cell build cell.wcl -o my-app.cell   # the build tool is a cell too
 ```
 
-This needs: a Rust toolchain with the `x86_64-unknown-linux-musl` target,
-`zig` (musl C compiler for the zstd and ring sources), `mksquashfs`
-(squashfs-tools), `newuidmap` and an `/etc/subuid` entry for the build
-namespace. `oci://` bases are pulled from the registry by the tool itself;
-`docker://` uses a local Docker instead.
+Cell takes the single-file idea of AppImage, the full-rootfs isolation of
+FlatImage, and Flatpak's grant model and NVIDIA driver handling, and puts
+them behind one declarative build file written in
+[WCL](https://github.com/wiltaylor/wcl).
 
-## The builder as a cell
+## Contents
 
-`examples/dist/cell-builder.cell` is the build tool packaged as a cell: the
-static `cell` tool, the launcher it embeds in every output, and an Alpine
-runtime with `mksquashfs` and `curl`. It needs no installation, no Docker,
-no `newuidmap` and no subordinate ids:
+- [Why](#why)
+- [How it compares](#how-it-compares)
+- [Quick start](#quick-start)
+- [The build file](#the-build-file)
+- [Grants](#grants)
+- [GPU: OpenGL and Vulkan](#gpu-opengl-and-vulkan)
+- [Layers and sharing](#layers-and-sharing)
+- [Running a cell](#running-a-cell)
+- [State, saves and overrides](#state-saves-and-overrides)
+- [Building from source](#building-from-source)
+- [Examples and test results](#examples-and-test-results)
+- [How it works](#how-it-works)
+- [Host requirements](#host-requirements)
+- [For AI agents](#for-ai-agents)
+- [Status and roadmap](#status-and-roadmap)
+- [License](#license)
+
+## Why
+
+Shipping a Linux application is hard because every host is different.
+AppImage solves the file problem but not the library problem: the app still
+links against the host glibc, so it must be built on an old distribution and
+it does not run on NixOS. Flatpak solves the library problem with runtimes
+and a sandbox, but needs Flatpak installed and a repository. FlatImage packs
+a whole distribution into one file and sandboxes it, but configures the
+sandbox by patching the binary and leaves GPU drivers to the author.
+
+Cell's goals:
+
+1. **One file.** A static musl launcher heads the file. It has no dynamic
+   dependencies, so it starts on any kernel from 5.11 up.
+2. **No host dependency.** The image carries its own glibc and userland.
+   The host's libraries are never loaded, with one deliberate exception:
+   the NVIDIA proprietary userspace, which must match the host's kernel
+   module.
+3. **Isolation by default.** No network, no display, no audio, no GPU, no
+   host files until the manifest grants them.
+4. **Real desktop integration.** Wayland, X11, PipeWire, PulseAudio,
+   gamepads, D-Bus, host fonts, OpenGL and Vulkan on Mesa and NVIDIA.
+5. **Large payloads.** Layers are squashfs images mounted lazily; a 40 GB
+   game starts as fast as a 4 MB tool. Runtimes can be shared between cells.
+6. **Declarative builds.** A `cell.wcl` file says what goes in and what the
+   app may touch. `cell build` does the rest, without root and without
+   Docker.
+
+## How it compares
+
+| | AppImage | Flatpak | FlatImage | **Cell** |
+| --- | --- | --- | --- | --- |
+| Single file | yes | no | yes | yes (or shared runtime files) |
+| Needs anything installed on the host | FUSE | Flatpak | FUSE | FUSE module, user namespaces |
+| Own glibc and userland | no | yes | yes | yes |
+| Runs on NixOS unchanged | rarely | yes | yes | yes |
+| Sandbox | none | bwrap | bwrap | built into the launcher |
+| Grants | – | `finish-args` | `fim-perms`, patched into the binary | manifest, immutable |
+| Mesa | host | runtime | author installs | runtime |
+| NVIDIA | host | per-version extension download | host symlinks | download to match the kernel module, or host symlinks |
+| Build definition | scripts | JSON/YAML manifest | shell commands | `cell.wcl` |
+| Build needs root or Docker | no | no | no | no |
+
+## Quick start
+
+You need a Linux host with unprivileged user namespaces and the `fuse`
+module (every mainstream distribution has both). Get `cell-builder.cell`
+from the releases page or build it as shown under
+[Building from source](#building-from-source).
+
+1. Write `cell.wcl` in a directory with your app's files:
+
+```wcl
+import <cell.wcl>
+
+app "dev.example.hello" {
+  name    = "Hello"
+  version = "1.0"
+
+  runtime {
+    base     = "oci://alpine:3.22"
+    packages = ["sdl2"]
+  }
+
+  build {
+    copy { from = "./hello" to = "/app/hello" }
+  }
+
+  entry { exec = ["/app/hello"] }
+
+  isolation { network = false home = :private }
+
+  integration {
+    display = [:wayland, :x11_fallback]
+    audio   = [:pipewire, :pulse]
+    gpu { enable = true }
+  }
+}
+```
+
+2. Build it:
 
 ```sh
 ./cell-builder.cell validate cell.wcl
-./cell-builder.cell build cell.wcl -o my-app.cell
+./cell-builder.cell build cell.wcl -o hello.cell
 ```
 
-It starts in the directory you run it from and can see your home, `/tmp`,
-`/mnt`, `/media` and `/run/media`. Inside it, builds run in a nested user
-namespace with one mapped id, so files a package manager gives to other
-users stay root-owned; the launcher reports every image file as owned by
-the user, so that changes nothing at run time. Build it with
-`just example-build cell-builder`.
+The first build pulls the base image from the registry and installs the
+packages (seconds for Alpine, minutes for an Arch runtime with Mesa). The
+runtime is cached under `~/.cache/cell/runtimes`, so the next build with
+the same `runtime` block takes seconds.
 
-## For agents
-
-`.claude/skills/cell/` is a Claude Code skill that writes `cell.wcl` files
-from recipes, builds them with the tool or the builder cell, runs the
-result and diagnoses failures. Copy the directory into another project's
-`.claude/skills/`, or point `CELL_BUILDER` at the builder cell.
-
-## Make a cell
+3. Run it anywhere:
 
 ```sh
-cd examples/tuxracer
-../../target/release/cell validate cell.wcl
-../../target/release/cell build cell.wcl -o tuxracer.cell
-./tuxracer.cell
+./hello.cell
+CELL_CMD=info ./hello.cell     # what the host offers and what was granted
 ```
 
-`cell build` runs every step as root in a user namespace mapped with your
-subordinate ids, like rootless podman. The runtime layer (base image plus
-packages) is cached in `~/.cache/cell/runtimes` by content key.
+## The build file
 
-## Run
+A build file starts with `import <cell.wcl>` and holds one `app` block. The
+schema lives in [`schema/cell.wcl`](schema/cell.wcl); WCL rejects unknown
+blocks and fields, and `cell validate` checks the rest.
+
+```wcl
+import <cell.wcl>
+
+app "dev.wiltaylor.mygame" {
+  name    = "My Game"
+  version = "1.2.0"
+  arch    = "x86_64"
+
+  runtime {
+    base      = "oci://archlinux:base"   // oci://, docker://, tar://, dir://
+    multilib  = true                     // 32-bit libraries (Wine)
+    placement = :referenced              // :embedded, :sidecar or :referenced
+    packages  = ["wine", "mesa", "lib32-mesa", "vulkan-icd-loader", "lib32-vulkan-icd-loader"]
+    setup     = ["echo runs as root before the packages install"]
+  }
+
+  build {
+    copy { from = "./dist/game" to = "/app/game" }
+    run  "winetricks --unattended corefonts" { }
+  }
+
+  layer "assets" {
+    source      = "./dist/assets"
+    mount       = "/app/game/assets"
+    compression = :raw                   // already compressed data: no zstd
+    placement   = :sidecar               // a file in mygame.cell.d/
+  }
+
+  entry {
+    exec      = ["wine", "/app/game/Game.exe"]
+    cwd       = "/app/game"
+    gamescope = false
+    env "WINEDLLOVERRIDES" { value = "dxgi=n" }
+    command "editor" { exec = ["wine", "/app/game/Editor.exe"] }
+  }
+
+  isolation {
+    network = false
+    home    = :portable                  // :private, :portable or :host
+    pid     = :private
+    shm     = false
+    bind "ro" { host = "/mnt/mods" guest = "/app/mods" }
+  }
+
+  integration {
+    display = [:x11, :wayland]
+    audio   = [:pipewire, :pulse]
+    input   = [:gamepad, :uinput]
+    dbus    = :off
+    fonts   = true
+    themes  = false
+    gpu { enable = true nvidia = :auto vaapi = true }
+    desktop { icon = "./dist/icon.png" categories = ["Game"] }
+  }
+}
+```
+
+| Block | What it declares |
+| --- | --- |
+| `runtime` | The base system and the packages installed into it. The result is the runtime layer, cached by content. |
+| `build` | `copy` and `run` steps applied on top of the runtime. `run` steps execute as root inside the image with network. Only their changes go into the app layer. |
+| `layer` | Extra data mounted at a path inside the sandbox. `:raw` skips compression; `:sidecar` keeps it out of the main file. |
+| `entry` | The command, working directory, environment and named alternative commands. `$PWD` in `cwd` means the directory the cell was started from. |
+| `isolation` | Namespaces, home mode, and extra binds. `$PWD` works in bind paths too. |
+| `integration` | The grants: display, audio, input, D-Bus, fonts, themes, GPU, desktop data. |
+| `template` | A named block beside `app` whose sub-blocks an app starts from (`template = "name"`). |
+
+Package names follow the base distribution. `oci://archlinux:base` is the
+reference runtime because it tracks current Mesa and glibc; `oci://alpine`
+makes tiny tool cells; Debian, Ubuntu and Fedora images work with their
+package managers. `none` is a reserved word in WCL, so the schema spells
+"no compression" as `:raw` and "no D-Bus" or "no NVIDIA" as `:off`.
+
+## Grants
+
+Nothing is visible by default. Each grant maps to concrete bind mounts and
+environment variables, in the spirit of Flatpak's `finish-args`.
+
+| Grant | Effect inside the sandbox |
+| --- | --- |
+| `display = [:wayland]` | The Wayland socket and `WAYLAND_DISPLAY` |
+| `display = [:x11]` | The X socket, a fresh wildcard Xauthority cookie, `DISPLAY`. Keeps the host IPC namespace for MIT-SHM, as Flatpak does |
+| `:x11_fallback` | X11 only when the host has no Wayland socket |
+| `audio = [:pipewire, :pulse, :alsa]` | The PipeWire socket, the PulseAudio socket with `PULSE_SERVER`, or `/dev/snd` |
+| `input = [:gamepad, :uinput]` | `/dev/input`, `/dev/hidraw*` and the udev database; `/dev/uinput` for Steam Input |
+| `network = true` | The host network namespace plus `resolv.conf` and `hosts`. `false` gives a private namespace with loopback |
+| `dbus = :session` | The session bus, unfiltered |
+| `fonts = true` | Host fonts under `/run/host/fonts` with a fontconfig snippet; NixOS paths included |
+| `themes = true` | Host icon and cursor themes, `XCURSOR_PATH` |
+| `gpu { enable = true }` | `/dev/dri` and the `/sys` trees libdrm reads. Mesa inside the runtime does the rest |
+| `gpu { nvidia = ... }` | See below |
+| `shm = true` | The host `/dev/shm` |
+| `home = :private` | A per-app home in `~/.local/share/cell/apps/<id>/home`, bound at the real `$HOME` path |
+| `home = :portable` | The same, but in `<name>.cell.d/state/` beside the file, so saves travel with it |
+| `home = :host` | The real home. For tools, not games |
+| `bind "ro|rw|dev" { host guest }` | Any other path |
+
+Inside the sandbox the app runs as the real user with the real username,
+synthesized into `/etc/passwd`. Every image file shows as owned by that
+user; permission bits still apply.
+
+## GPU: OpenGL and Vulkan
+
+**Mesa** (AMD, Intel, Nouveau, llvmpipe) needs nothing from the host. The
+kernel DRM interface is a stable ABI, so the Mesa inside the runtime drives
+any kernel. Put `mesa`, `vulkan-icd-loader` and the ICDs you want
+(`vulkan-intel`, `vulkan-radeon`, `vulkan-swrast`) in the runtime and grant
+`gpu { enable = true }`. This is the whole story on NixOS, Steam Deck
+hardware, laptops with integrated graphics, and AMD desktops.
+
+**NVIDIA** proprietary drivers need a userspace that matches the loaded
+kernel module exactly. The launcher reads `/sys/module/nvidia/version` and
+applies the strategy from the manifest:
+
+| `nvidia =` | Behaviour |
+| --- | --- |
+| `:auto` (default) | `:fetch`, then `:host` when the download fails or the host is offline |
+| `:fetch` | Download `NVIDIA-Linux-x86_64-<version>.run` from NVIDIA once into `~/.cache/cell/drivers/`, unpack the libraries, create the SONAME links the installer would, and use them. This is the Flatpak model; nothing is redistributed. On the test machine the first run took 17 s |
+| `:host` | Symlink the host's NVIDIA libraries into the sandbox. Works with FHS distributions and with NixOS's `/run/opengl-driver` |
+| `:off` | Mesa or software only |
+
+In every mode the launcher binds `/dev/nvidia*`, regenerates `ld.so.cache`
+inside the sandbox instead of setting `LD_LIBRARY_PATH` (which breaks Steam
+and Wine), and writes the glvnd, Vulkan ICD and EGL platform files. PRIME
+offload works with the usual `__NV_PRIME_RENDER_OFFLOAD=1
+__GLX_VENDOR_LIBRARY_NAME=nvidia`. Override per run with
+`CELL_NVIDIA=fetch|host|off`.
+
+## Layers and sharing
+
+A cell is a stack of squashfs layers mounted over FUSE by the launcher's own
+FUSE server, merged by an overlay with a writable upper directory on the
+host:
+
+```
+| launcher ELF | runtime layer | app layer | data layers... | manifest | trailer |
+```
+
+Each layer has a placement:
+
+- `:embedded` — inside the file. The default. One file that works offline.
+- `:sidecar` — a file in `<name>.cell.d/`. Keeps multi-gigabyte assets out
+  of the main file and lets a publisher update the app without reshipping
+  them.
+- `:referenced` — a content-addressed file, `runtime-<hash>.layer`, beside
+  the cell. Every cell in that directory with the same runtime shares one
+  file. The launcher also searches `CELL_LAYER_PATH`, `<name>.cell.d/`,
+  `~/.local/share/cell/layers` and `~/.cache/cell/layers`, so a user can
+  keep one store of runtimes. `examples/dist/` holds a 268 MiB runtime with
+  `tuxracer.cell` and `gl-tools.cell` at 3 MiB each on top of it.
+
+Data layers with `compression = :raw` are served without decompression,
+which suits game assets that are already compressed.
+
+## Running a cell
 
 ```sh
-./app.cell                      # run the entry point
-CELL_CMD=info ./app.cell        # host probe, grants, layers
-CELL_CMD=shell ./app.cell       # a shell inside the sandbox
-CELL_CMD=verify ./app.cell      # check layer hashes
-CELL_COMMAND=glxinfo ./app.cell # run a named alternative command
-CELL_NVIDIA=host ./app.cell     # force one NVIDIA strategy (host, fetch, none)
+./app.cell [args]                  # run the entry point; args go to the program
+CELL_CMD=info ./app.cell           # host probe, grants, layer files, exec line
+CELL_CMD=shell ./app.cell -c 'ls'  # run a command inside the sandbox
+CELL_CMD=verify ./app.cell         # check every layer's BLAKE3 hash
+CELL_CMD=manifest ./app.cell       # dump the manifest
+CELL_COMMAND=editor ./app.cell     # run a named alternative command
+cell inspect app.cell              # the same from the build tool
 ```
 
-A layer can be `:embedded` in the file, a `:sidecar` in `<name>.cell.d/`,
-or `:referenced`: a content-addressed `runtime-<hash>.layer` file beside
-the cell. Cells built into one directory with the same runtime share that
-one file; `examples/dist/` holds `tuxracer.cell` and `gl-tools.cell` at
-3 MiB each on top of one 268 MiB runtime. The launcher looks for a
-referenced layer in `CELL_LAYER_PATH`, the cell's directory,
-`<name>.cell.d/`, `~/.local/share/cell/layers` and `~/.cache/cell/layers`,
-and names the file and every directory it tried when it is missing.
+| Variable | Effect |
+| --- | --- |
+| `CELL_NVIDIA` | `auto`, `fetch`, `host` or `off` for this run |
+| `CELL_NO_GAMESCOPE` | Skip the gamescope wrapper |
+| `CELL_LAYER_PATH` | Extra directories for referenced layers, colon separated |
+| `CELL_FILE` | Read the payload from another file, for a cell on a `noexec` mount |
 
-Writable state lives in `$XDG_DATA_HOME/cell/apps/<id>/`: an overlay upper
-directory for everything the app writes outside its home, and `home/` which
-is bound at the real `$HOME` path. `home = :portable` moves that beside the
-`.cell` file instead.
+A second instance of a running app starts with a throwaway overlay and
+prints a notice; both instances share the home directory. Killing the
+launcher kills the whole sandbox: pid 1 inside is a small init that gets
+`SIGKILL` when the launcher dies, forwards signals, reaps orphans and waits
+for daemons such as `wineserver` to finish after the entry point exits.
 
-## Layout
+## State, saves and overrides
 
+Writable state lives in `~/.local/share/cell/apps/<id>/`:
+
+- `upper/` is the overlay upper directory: everything the app writes outside
+  its home, for example a Wine registry under `/etc` or a shader cache
+  under `/var`.
+- `home/` is bound at the real `$HOME` path when `home = :private`.
+- `instance.lock` is the per-app lock.
+
+Delete the directory to reset an app, Wine prefix included. With
+`home = :portable` the same layout lives in `<name>.cell.d/state/` beside
+the file. Caches for downloads live in `~/.cache/cell/`: `oci/` (image
+blobs and extracted bases), `runtimes/` (built runtime layers), `drivers/`
+(NVIDIA userspace), `build/` (scratch, safe to delete).
+
+## Building from source
+
+Requirements on the build machine:
+
+- A Rust toolchain with the `x86_64-unknown-linux-musl` target
+  (`rustup target add x86_64-unknown-linux-musl`).
+- `zig`, used as the musl C compiler for the zstd and ring sources through
+  `tools/musl-cc`.
+- `squashfs-tools` (`mksquashfs`) for the build tool.
+- [`just`](https://github.com/casey/just) for the recipes below (optional).
+- For the installed build tool: `newuidmap` and an `/etc/subuid` entry
+  (`usermod --add-subuids 100000-165535 --add-subgids 100000-165535 $USER`).
+  The packaged `cell-builder.cell` does not need these.
+
+```sh
+just all-build                   # the static launcher and the cell tool
+just example-build cell-builder  # the build tool as a cell, in examples/dist/
+just example-build tuxracer      # Extreme Tux Racer on an Arch runtime
+just workspace-check             # tests and clippy
 ```
-crates/cell-core      file format, squashfs reader, FUSE server, sandbox
-crates/cell-launcher  the static launcher (musl)
-crates/cell           the build tool (reads cell.wcl)
-schema/cell.wcl       the WCL schema for build files
-examples/             alpine-test, tuxracer, gl-tools, wine-doom, cell-builder; built into examples/dist/
-.claude/skills/cell   the agent skill
-tools/musl-cc         zig wrapper used as the musl C compiler
-```
 
-## Status
+The workspace has three crates:
 
-Working: launcher, layers, overlay, an init at pid 1, grants for display,
-audio, input, dbus, fonts, GPU (Mesa; NVIDIA fetched from NVIDIA to match
-the kernel module, or bound from the host), build tool with native
-`oci://`, `docker://`, `tar://` and `dir://` bases, data layers, sidecars,
-named commands.
+| Crate | Role |
+| --- | --- |
+| `cell-core` | The file format and manifest, a random-access squashfs reader, the FUSE server, the sandbox (namespaces, mounts, grants, `pivot_root`, `exec`), host probing, NVIDIA driver fetching |
+| `cell-launcher` | The static musl binary that heads every `.cell`: 3 MiB, no dynamic dependencies |
+| `cell` | The build tool: reads `cell.wcl` through the WCL crate, pulls OCI images, runs builds in a user namespace, packs and assembles |
 
-Not yet: seccomp filters, D-Bus filtering, desktop file install, signing,
-the `proot` fallback for hosts without user namespaces.
+The WCL dependency is pinned to a git revision of
+[wiltaylor/wcl](https://github.com/wiltaylor/wcl).
 
-## Tested on 2026-10-19
+## Examples and test results
 
-Host: CachyOS, kernel 7.2, KDE on Wayland, Intel Iris Xe plus an NVIDIA
-RTX 4060 with driver 615.71.09.
+All examples build into `examples/dist/` with `just example-build <name>`.
+The Wine example needs `examples/wine-doom/fetch-assets.sh` first, which
+downloads Chocolate Doom and Freedoom.
+
+Tested on 2026-10-19 and 2026-10-20 on CachyOS (kernel 7.2), KDE on
+Wayland, Intel Iris Xe plus an NVIDIA RTX 4060 on driver 615.71.09:
 
 | Example | Size | Result |
 | --- | --- | --- |
-| `examples/alpine-test` | 5 MiB | Entry point runs as the real user; FUSE layers, overlay, private `/dev`, `/tmp`, `/run` |
-| `examples/tuxracer` | 3 MiB + 268 MiB shared runtime | OpenGL 4.6 and Vulkan 1.4 on Intel through the runtime's Mesa; NVIDIA through the fetched 615.71.09 userspace (17 s first run) and through host libraries; a full race renders at 2560x1600; an audio stream reaches the host |
-| `examples/gl-tools` | 3 MiB + the same runtime | glxinfo, vulkaninfo, vkcube and eglinfo on the runtime file Tux Racer uses |
-| `examples/cell-builder` | 12 MiB | The build tool itself; built gl-tools and a fresh Arch runtime with pacman from inside its own sandbox |
-| `examples/wine-doom` | 767 MiB | Wine prefix created on first run; Minesweeper and Chocolate Doom (Freedoom) run through Wine with wined3d and DirectSound audio |
+| `alpine-test` | 5 MiB | Entry point runs as the real user; FUSE layers, overlay, private `/dev`, `/tmp`, `/run` |
+| `tuxracer` | 3 MiB + 268 MiB shared runtime | OpenGL 4.6 and Vulkan 1.4 on Intel through the runtime's Mesa; NVIDIA through the fetched userspace and through host libraries; a full race renders at 2560x1600; audio reaches the host |
+| `gl-tools` | 3 MiB + the same runtime | glxinfo, vulkaninfo, vkcube, eglinfo on the shared runtime file |
+| `wine-doom` | 767 MiB | Wine prefix created on first run; Minesweeper and Chocolate Doom (Freedoom) run through Wine with wined3d and DirectSound audio |
+| `cell-builder` | 12 MiB | The build tool itself; built `gl-tools` and a fresh Arch runtime with pacman from inside its own sandbox |
 
-Notes:
+## How it works
 
-- Every file in the image shows as owned by the user. The launcher's
-  namespace maps one uid, so the FUSE layer reports that uid for every
-  file. Permission bits still apply as usual.
-- An X11 grant keeps the host IPC namespace (MIT-SHM), as Flatpak does.
-- The first instance of an app owns its overlay upper directory. A second
-  instance of the same app runs with a throwaway upper and prints a notice.
-  Both share the home directory.
+At run time the launcher:
+
+1. Reads the 64-byte trailer at the end of its own executable, then the
+   CBOR manifest with the layer table. Resolves referenced layers.
+2. Probes the host: kernel, user namespaces, `/dev/fuse`, display sockets,
+   audio sockets, GPU vendor, NVIDIA module version.
+3. Takes the instance lock and, if needed, fetches the NVIDIA userspace
+   while it still has host network.
+4. Enters a user namespace in which the real uid is root, plus a mount
+   namespace and, unless `network = true`, a network namespace with
+   loopback up.
+5. Mounts a tmpfs work area and each layer with its built-in FUSE server by
+   a direct `mount(2)` on `/dev/fuse`. No `fusermount`, no setuid helper.
+6. Mounts the overlay root, a private `/dev`, `/tmp` and `/run`, a read-only
+   `/sys`, the device nodes, and every grant.
+7. Clones a child straight into a new pid namespace. The child mounts
+   `/proc`, pivots into the new root, runs `ldconfig` for the GPU libraries,
+   enters an inner user namespace that maps root back to the real uid, and
+   executes a small init which starts the entry point.
+8. Waits, forwards signals, and returns the exit code. The kernel tears the
+   namespaces down with the last process.
+
+The build tool uses the same sandbox code to run package managers and
+build steps, as root in a user namespace mapped with the caller's
+subordinate ids, or with one mapped id when running inside a cell.
+`DESIGN.md` has the full design and the implementation notes.
+
+## Host requirements
+
+| Needs | Why |
+| --- | --- |
+| Linux 5.11 or newer | Overlayfs inside a user namespace. FUSE in a user namespace needs 4.18 |
+| Unprivileged user namespaces | `kernel.unprivileged_userns_clone=1`, `user.max_user_namespaces>0`. On Ubuntu 23.10 and later also `kernel.apparmor_restrict_unprivileged_userns=0` or an AppArmor profile |
+| `/dev/fuse` | The `fuse` module |
+| Linux 6.9 or newer | Optional: FUSE passthrough for raw data layers |
+
+The launcher reports a missing requirement with the fix. A host that forbids
+user namespaces cannot run cells today; the `proot` fallback from the design
+is not implemented.
+
+## For AI agents
+
+`.claude/skills/cell/` is a Claude Code skill: it writes `cell.wcl` files
+from recipes (native game, Wine game, CLI tool), builds them with the tool
+or the builder cell, runs the result and diagnoses missing windows, sound or
+GPU. Copy the directory into another project's `.claude/skills/` and point
+`CELL_BUILDER` at `cell-builder.cell`.
+
+## Status and roadmap
+
+Working: the launcher, layers, overlay, init, every grant above, Mesa and
+NVIDIA (fetch and host), native OCI pulls with token auth and digest
+verification, `docker://`, `tar://` and `dir://` bases, data layers,
+sidecar and referenced placement, named commands, instance locking, the
+packaged builder, the agent skill.
+
+Planned:
+
+- seccomp filters and a filtered D-Bus proxy for portals
+- desktop file and icon install (`CELL_CMD=install`)
+- signing with ed25519 and a verification policy
+- fetching a missing referenced layer from a URL recorded in the manifest
+- an `aarch64` launcher build
+- a `proot` fallback for hosts without user namespaces
+
+## License
+
+MIT. See [LICENSE](LICENSE).

@@ -16,7 +16,7 @@ serde.workspace = true
 ciborium.workspace = true
 blake3.workspace = true
 cell-core = { path = "../cell-core" }
-wcl_lang = { path = "/home/wil/dev/WCL/crates/wcl_lang" }
+wcl_lang = { git = "https://github.com/wiltaylor/wcl.git", rev = "1d056a5779a05ef278ec8edc71282ce20d8068dc" }
 tar = "0.4"
 zstd.workspace = true
 flate2.workspace = true

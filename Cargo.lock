@@ -1039,6 +1039,7 @@ checksum = "ccf3ec651a847eb01de73ccad15eb7d99f80485de043efb2f370cd654f4ea44b"
 [[package]]
 name = "wcl_lang"
 version = "0.0.0"
+source = "git+https://github.com/wiltaylor/wcl.git?rev=1d056a5779a05ef278ec8edc71282ce20d8068dc#1d056a5779a05ef278ec8edc71282ce20d8068dc"
 dependencies = [
  "miette",
  "serde",
