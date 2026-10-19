@@ -24,9 +24,10 @@ just all-build
 ```
 
 This needs: a Rust toolchain with the `x86_64-unknown-linux-musl` target,
-`zig` (musl C compiler for the zstd sources), `mksquashfs` (squashfs-tools),
-`docker` for `oci://` bases, `newuidmap` and an `/etc/subuid` entry for the
-build namespace.
+`zig` (musl C compiler for the zstd and ring sources), `mksquashfs`
+(squashfs-tools), `newuidmap` and an `/etc/subuid` entry for the build
+namespace. `oci://` bases are pulled from the registry by the tool itself;
+`docker://` uses a local Docker instead.
 
 ## Make a cell
 
@@ -70,13 +71,15 @@ tools/musl-cc         zig wrapper used as the musl C compiler
 
 ## Status
 
-Working: launcher, layers, overlay, grants for display, audio, input, dbus,
-fonts, GPU (Mesa and host NVIDIA), build tool with `oci://`, `tar://` and
-`dir://` bases, data layers, sidecars, named commands.
+Working: launcher, layers, overlay, an init at pid 1, grants for display,
+audio, input, dbus, fonts, GPU (Mesa; NVIDIA fetched from NVIDIA to match
+the kernel module, or bound from the host), build tool with native
+`oci://`, `docker://`, `tar://` and `dir://` bases, data layers, sidecars,
+named commands.
 
-Not yet: NVIDIA `:fetch` (download the matching driver from NVIDIA), seccomp
-filters, D-Bus filtering, desktop file install, signing, the `proot`
-fallback for hosts without user namespaces.
+Not yet: seccomp filters, D-Bus filtering, desktop file install, signing,
+the `proot` fallback for hosts without user namespaces, a lock so two
+instances of one app do not fight over the same state directory.
 
 ## Tested on 2026-10-19
 
@@ -86,14 +89,13 @@ RTX 4060 with driver 615.71.09.
 | Example | Size | Result |
 | --- | --- | --- |
 | `examples/alpine-test` | 5 MiB | Entry point runs as the real user; FUSE layers, overlay, private `/dev`, `/tmp`, `/run` |
-| `examples/tuxracer` | 269 MiB | OpenGL 4.6 and Vulkan 1.4 on Intel through the runtime's Mesa; NVIDIA via host libraries with PRIME offload; a full race renders at 2560x1600; an audio stream reaches the host |
-| `examples/wine-doom` | 766 MiB | Wine prefix created on first run; Minesweeper and Chocolate Doom (Freedoom) run through Wine with wined3d |
+| `examples/tuxracer` | 269 MiB | OpenGL 4.6 and Vulkan 1.4 on Intel through the runtime's Mesa; NVIDIA through the fetched 615.71.09 userspace (17 s first run) and through host libraries; a full race renders at 2560x1600; an audio stream reaches the host |
+| `examples/wine-doom` | 766 MiB | Wine prefix created on first run; Minesweeper and Chocolate Doom (Freedoom) run through Wine with wined3d and DirectSound audio |
 
-Known issues:
+Notes:
 
-- Chocolate Doom under Wine reports `DirectSoundCreate8` class not
-  registered, so it runs without sound. Native PulseAudio and PipeWire
-  clients work.
-- Root-owned files in the image show as `nobody` for uids the namespace does
-  not map. Permission bits still apply as usual.
+- Files owned by uids the namespace does not map show as `nobody`.
+  Permission bits still apply as usual.
 - An X11 grant keeps the host IPC namespace (MIT-SHM), as Flatpak does.
+- Two instances of one app at the same time fail with `Resource busy`,
+  because they share one overlay upper directory.

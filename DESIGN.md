@@ -260,7 +260,7 @@ launcher reads `/sys/module/nvidia/version`. The manifest picks a strategy:
 
 | `nvidia =` | Behaviour |
 | --- | --- |
-| `:fetch` (default) | Look in `$XDG_CACHE_HOME/cell/drivers/nvidia-<version>/`. If absent, download `NVIDIA-Linux-x86_64-<version>.run` from NVIDIA, with the same URL list the Flathub extension uses. The `.run` is a makeself archive: a shell header, then an xz stream. The launcher skips the header and unpacks the xz stream with a Rust decoder. It keeps the GL, EGL, GLX, Vulkan, NVENC, CUDA and Wayland libraries, plus `32/` when the runtime is multilib. It writes the glvnd and Vulkan ICD JSON files. Nothing is redistributed, which keeps the licence question identical to Flatpak's |
+| `:fetch` | Look in `$XDG_CACHE_HOME/cell/drivers/nvidia-<version>/`. If absent, download `NVIDIA-Linux-x86_64-<version>.run` from NVIDIA, with the same URL list the Flathub extension uses. The `.run` is a makeself archive: a shell header with a `skip=` line count, then a zstd stream (current drivers) or an xz stream (older ones). The launcher skips the header and unpacks the stream with Rust decoders. It keeps the GL, EGL, GLX, Vulkan, NVENC, CUDA and Wayland libraries plus the `32/` copies, and creates the SONAME links the installer would make. It writes the glvnd and Vulkan ICD JSON files. Nothing is redistributed, which keeps the licence question identical to Flatpak's |
 | `:host` | Bind the host libraries. Discovery order: `/run/opengl-driver/lib` and `/run/opengl-driver-32/lib` on NixOS, then the host `ld.so.cache` and the well-known lib directories for `libnvidia-*` and `libcuda*`. Only the NVIDIA files are bound, into `/run/cell/gpu/lib`. The host glibc is never bound |
 | `:auto` | `:fetch`, then `:host` when offline, then warn |
 | `:none` | Software or Mesa only |
@@ -589,9 +589,18 @@ sections above:
 - **The symbols `none` is reserved in WCL**, so the schema uses `raw` for
   uncompressed layers and `off` for D-Bus and NVIDIA.
 - **The manifest holds the layer table**; there is no separate table.
-- **NVIDIA `:fetch` is not implemented yet.** `:auto` currently means `:host`.
-- **Base images come through `docker export`** for `oci://`. A native
-  registry client is future work.
+- **NVIDIA `:fetch` is implemented** with `ureq` on rustls, which compiles
+  for musl through the zig wrapper. `:auto` fetches, then falls back to host
+  libraries. The driver archives are zstd today, not xz; both are read. The
+  tar holds no symlinks, so the launcher reads `DT_SONAME` from each library
+  and creates the links itself. The launcher grew to 3 MiB.
+- **`oci://` bases are pulled natively**: token auth, manifest lists,
+  digest-verified blobs, layer whiteouts, and a rootfs cache keyed by the
+  manifest digest. `docker://` keeps the `docker export` path.
+- **Pid 1 of the sandbox is a small init**, as in bubblewrap. The entry
+  point is its child. The init forwards signals, reaps orphans, and waits
+  for daemons such as `wineserver` to finish after the entry point exits.
+  Without that, the registry Wine writes at shutdown was lost.
 - **Opaque-directory markers from the build overlay are not carried** into
   the app layer, because the FUSE server does not serve xattrs. Whiteouts
   (character devices 0:0) are carried.
