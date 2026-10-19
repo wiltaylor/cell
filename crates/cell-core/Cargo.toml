@@ -14,3 +14,8 @@ blake3.workspace = true
 fuser.workspace = true
 zstd.workspace = true
 flate2.workspace = true
+# NVIDIA `:fetch`: a pure-Rust HTTPS client, xz decoder and tar reader, so
+# the static musl launcher can download and unpack the driver archive.
+ureq = { version = "3", default-features = false, features = ["rustls"] }
+lzma-rs = "0.3"
+tar = "0.4"
