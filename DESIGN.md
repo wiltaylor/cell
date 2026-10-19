@@ -597,6 +597,14 @@ sections above:
 - **`oci://` bases are pulled natively**: token auth, manifest lists,
   digest-verified blobs, layer whiteouts, and a rootfs cache keyed by the
   manifest digest. `docker://` keeps the `docker export` path.
+- **The FUSE layer squashes ownership** to the mounting user. The outer
+  namespace maps one uid, so any other uid or gid stored in the image is
+  unmapped, and even root in the namespace cannot create a mount point in
+  such a directory. An image whose `/` was not owned by uid 0 and gid 0
+  failed to start before this. The build tool keeps real ownership.
+- **One instance owns the state.** The launcher takes an `flock` on
+  `instance.lock` in the state directory. A second instance of the same app
+  runs with a throwaway overlay upper and shares the home bind.
 - **Pid 1 of the sandbox is a small init**, as in bubblewrap. The entry
   point is its child. The init forwards signals, reaps orphans, and waits
   for daemons such as `wineserver` to finish after the entry point exits.

@@ -122,7 +122,22 @@ fn real_main() -> Result<i32> {
             mount,
         });
     }
-    spec.upper = Some((state.upper.clone(), state.work.clone()));
+    spec.squash_ids = Some((0, 0));
+
+    // One instance owns the overlay upper directory. A second instance of
+    // the same app runs with a throwaway upper, so writes outside the home
+    // directory do not persist for it. The home bind is shared and is
+    // outside the overlay, so both instances see the same saves.
+    let lock = grants::instance_lock(&state)?;
+    if lock.is_some() {
+        spec.upper = Some((state.upper.clone(), state.work.clone()));
+    } else {
+        eprintln!(
+            "cell: another instance of {} is running; this one keeps no changes outside $HOME",
+            m.app.id
+        );
+        spec.upper = None;
+    }
 
     if !host.fuse {
         bail!("/dev/fuse is missing on this host (load the fuse module)");
@@ -136,6 +151,7 @@ fn real_main() -> Result<i32> {
     spec.drop_to = Some((host.uid, host.gid));
     sandbox::enter_userns_root(spec.new_net, spec.new_ipc)?;
     let code = sandbox::run(&spec, &work)?;
+    drop(lock);
     Ok(code)
 }
 

@@ -3,7 +3,7 @@
 
 use std::path::{Path, PathBuf};
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use cell_core::format::{
     Audio, BindMode, Dbus, Display, HomeMode, Input, Manifest, NvidiaMode, PidMode,
 };
@@ -15,6 +15,29 @@ pub struct StateDirs {
     pub upper: PathBuf,
     pub work: PathBuf,
     pub home: PathBuf,
+}
+
+/// Take the app's instance lock. `None` means another instance holds it.
+/// The lock lives as long as the returned file.
+pub fn instance_lock(state: &StateDirs) -> Result<Option<std::fs::File>> {
+    use std::os::unix::io::AsRawFd;
+    let path = state.upper.parent().unwrap_or(&state.upper).join("instance.lock");
+    let f = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(&path)?;
+    let r = unsafe { libc::flock(f.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
+    if r == 0 {
+        Ok(Some(f))
+    } else {
+        let e = std::io::Error::last_os_error();
+        if e.raw_os_error() == Some(libc::EWOULDBLOCK) {
+            Ok(None)
+        } else {
+            Err(e).context("instance lock")
+        }
+    }
 }
 
 /// Where this app keeps its writable state.

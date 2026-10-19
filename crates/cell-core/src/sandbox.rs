@@ -66,6 +66,11 @@ pub struct Spec {
     pub late_file_binds: Vec<(String, String)>,
     /// Keep the host `/proc` and pid namespace.
     pub host_proc: bool,
+    /// Report every file in a squashfs layer as owned by this (uid, gid).
+    /// The launcher sets `Some((0, 0))`: the outer root, which the inner
+    /// namespace shows as the real user. The build tool leaves it `None` so
+    /// the real ownership reaches `mksquashfs`.
+    pub squash_ids: Option<(u32, u32)>,
     /// Before `exec`, enter an inner user namespace that maps the current
     /// uid 0 (the outer root) to this (uid, gid). The application then runs
     /// as the real user while every mount was made with root powers.
@@ -314,7 +319,13 @@ pub fn run(spec: &Spec, work: &Path) -> Result<i32> {
         match &layer.source {
             LayerSource::Squashfs { file, base, name } => {
                 let f = file.try_clone()?;
-                sessions.push(crate::fusefs::mount_layer(f, *base, &mp, name)?);
+                sessions.push(crate::fusefs::mount_layer(
+                    f,
+                    *base,
+                    &mp,
+                    name,
+                    spec.squash_ids,
+                )?);
             }
             LayerSource::Dir(d) => bind(d, &mp, BindMode::Ro)?,
         }

@@ -26,10 +26,16 @@ pub struct LayerFs {
     root_number: u32,
     inodes: HashMap<u32, Arc<Inode>>,
     dirs: HashMap<u32, Arc<Vec<DirEntry>>>,
+    /// Report every file as owned by this (uid, gid) instead of the ids
+    /// stored in the image. The launcher's user namespace maps one uid, so
+    /// an id the image stored for another user would be unmapped and
+    /// unusable: even root in the namespace could not create a mount point
+    /// in such a directory.
+    squash: Option<(u32, u32)>,
 }
 
 impl LayerFs {
-    pub fn new(fs: Squashfs) -> Result<Self> {
+    pub fn new(fs: Squashfs, squash: Option<(u32, u32)>) -> Result<Self> {
         let refs = fs.index()?;
         let root = fs.read_inode(fs.root_ref())?;
         Ok(LayerFs {
@@ -38,6 +44,7 @@ impl LayerFs {
             root_number: root.number,
             inodes: HashMap::new(),
             dirs: HashMap::new(),
+            squash,
         })
     }
 
@@ -87,6 +94,7 @@ impl LayerFs {
         };
         let t = UNIX_EPOCH + Duration::from_secs(inode.mtime as u64);
         let size = inode.size();
+        let (uid, gid) = self.squash.unwrap_or((inode.uid, inode.gid));
         FileAttr {
             ino: self.swap(inode.number as u64),
             size,
@@ -98,8 +106,8 @@ impl LayerFs {
             kind,
             perm: inode.perm,
             nlink: inode.nlink.max(1),
-            uid: inode.uid,
-            gid: inode.gid,
+            uid,
+            gid,
             rdev,
             blksize: self.fs.sb.block_size,
             flags: 0,
@@ -222,9 +230,15 @@ impl Filesystem for LayerFs {
 
 /// Mount a squashfs image (at `base` inside `file`) on `mountpoint`. The
 /// returned session must stay alive for as long as the mount is in use.
-pub fn mount_layer(file: std::fs::File, base: u64, mountpoint: &Path, name: &str) -> Result<fuser::BackgroundSession> {
+pub fn mount_layer(
+    file: std::fs::File,
+    base: u64,
+    mountpoint: &Path,
+    name: &str,
+    squash: Option<(u32, u32)>,
+) -> Result<fuser::BackgroundSession> {
     let fs = Squashfs::open(file, base).context("open squashfs layer")?;
-    let layer = LayerFs::new(fs)?;
+    let layer = LayerFs::new(fs, squash)?;
     let opts = [
         MountOption::RO,
         MountOption::FSName(format!("cell:{name}")),

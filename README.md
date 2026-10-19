@@ -78,8 +78,7 @@ the kernel module, or bound from the host), build tool with native
 named commands.
 
 Not yet: seccomp filters, D-Bus filtering, desktop file install, signing,
-the `proot` fallback for hosts without user namespaces, a lock so two
-instances of one app do not fight over the same state directory.
+the `proot` fallback for hosts without user namespaces.
 
 ## Tested on 2026-10-19
 
@@ -94,8 +93,10 @@ RTX 4060 with driver 615.71.09.
 
 Notes:
 
-- Files owned by uids the namespace does not map show as `nobody`.
-  Permission bits still apply as usual.
+- Every file in the image shows as owned by the user. The launcher's
+  namespace maps one uid, so the FUSE layer reports that uid for every
+  file. Permission bits still apply as usual.
 - An X11 grant keeps the host IPC namespace (MIT-SHM), as Flatpak does.
-- Two instances of one app at the same time fail with `Resource busy`,
-  because they share one overlay upper directory.
+- The first instance of an app owns its overlay upper directory. A second
+  instance of the same app runs with a throwaway upper and prints a notice.
+  Both share the home directory.
