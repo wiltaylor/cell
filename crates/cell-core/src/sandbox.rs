@@ -451,9 +451,10 @@ pub fn run(spec: &Spec, work: &Path) -> Result<i32> {
             .with_context(|| format!("symlink {link} -> {target}"))?;
     }
 
-    // Child: new pid namespace, new mount namespace copy, proc, pivot, exec.
-    // `unshare(CLONE_NEWPID)` may only be called once per process, so the
-    // child is cloned straight into its pid namespace instead.
+    // Child: new pid namespace, new mount namespace copy, proc, pivot, then
+    // a small init that runs the entry point. `unshare(CLONE_NEWPID)` may
+    // only be called once per process, so the child is cloned straight into
+    // its pid namespace instead.
     let mut clone_flags: libc::c_long = libc::SIGCHLD as libc::c_long;
     if spec.new_pid && !spec.host_proc {
         clone_flags |= libc::CLONE_NEWPID as libc::c_long;
@@ -464,7 +465,7 @@ pub fn run(spec: &Spec, work: &Path) -> Result<i32> {
     }
     if pid == 0 {
         let code = match child(spec, &root) {
-            Ok(()) => 0,
+            Ok(code) => code,
             Err(e) => {
                 eprintln!("cell: {e:#}");
                 125
@@ -492,14 +493,19 @@ pub fn run(spec: &Spec, work: &Path) -> Result<i32> {
     // Keep the FUSE sessions until the child is gone, then let the kernel
     // tear the namespaces down with us.
     std::mem::forget(sessions);
-    let code = if libc::WIFEXITED(status) {
+    Ok(exit_code(status))
+}
+
+/// The shell convention for a `wait` status: the exit code, or 128 plus
+/// the signal number.
+fn exit_code(status: libc::c_int) -> i32 {
+    if libc::WIFEXITED(status) {
         libc::WEXITSTATUS(status)
     } else if libc::WIFSIGNALED(status) {
         128 + libc::WTERMSIG(status)
     } else {
         1
-    };
-    Ok(code)
+    }
 }
 
 fn is_on_tmpfs_we_own(parent: &Path, root: &Path) -> bool {
@@ -508,7 +514,8 @@ fn is_on_tmpfs_we_own(parent: &Path, root: &Path) -> bool {
     matches!(first.as_deref(), Some("dev") | Some("tmp") | Some("run"))
 }
 
-fn child(spec: &Spec, root: &Path) -> Result<()> {
+/// Pid 1 of the sandbox. Returns the exit code of the entry point.
+fn child(spec: &Spec, root: &Path) -> Result<i32> {
     unshare(libc::CLONE_NEWNS).context("child mount namespace")?;
     mount("none", Path::new("/"), None, libc::MS_REC | libc::MS_PRIVATE, None)?;
     let proc_dir = root.join("proc");
@@ -574,7 +581,48 @@ fn child(spec: &Spec, root: &Path) -> Result<()> {
         bail!("nothing to run");
     }
     let argv: Vec<CString> = spec.exec.iter().map(|a| CString::new(a.as_str()).unwrap()).collect();
-    exec(&argv, &env)
+    init(&argv, &env)
+}
+
+/// Run the entry point as a child and act as the init of the pid namespace,
+/// the way `bwrap` does. Pid 1 reaps every orphan and returns only when no
+/// process is left. If the entry point were pid 1 itself, its exit would
+/// make the kernel SIGKILL every other process in the namespace at once.
+/// Daemons that outlive their client, such as Wine's `wineserver`, would
+/// then lose unsaved state (the Wine registry, for one). Signals from the
+/// launcher go to the entry point, not to its helpers.
+fn init(argv: &[CString], env: &[CString]) -> Result<i32> {
+    let entry = unsafe { libc::fork() };
+    if entry < 0 {
+        bail!("fork: {}", std::io::Error::last_os_error());
+    }
+    if entry == 0 {
+        if let Err(e) = exec(argv, env) {
+            eprintln!("cell: {e:#}");
+        }
+        unsafe { libc::_exit(125) };
+    }
+    CHILD.store(entry, Ordering::SeqCst);
+    unsafe {
+        libc::signal(libc::SIGINT, forward as *const () as libc::sighandler_t);
+        libc::signal(libc::SIGTERM, forward as *const () as libc::sighandler_t);
+        libc::signal(libc::SIGHUP, forward as *const () as libc::sighandler_t);
+    }
+    let mut code = 0;
+    loop {
+        let mut status = 0;
+        let r = unsafe { libc::wait(&mut status) };
+        if r == entry {
+            code = exit_code(status);
+        } else if r < 0 {
+            match std::io::Error::last_os_error().raw_os_error() {
+                Some(libc::EINTR) => continue,
+                Some(libc::ECHILD) => break,
+                _ => bail!("wait: {}", std::io::Error::last_os_error()),
+            }
+        }
+    }
+    Ok(code)
 }
 
 fn exec(argv: &[CString], env: &[CString]) -> Result<()> {
