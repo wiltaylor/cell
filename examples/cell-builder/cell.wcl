@@ -1,0 +1,50 @@
+import <cell.wcl>
+
+// The Cell build tool as a cell. Run it from any directory under your home:
+//
+//   ./cell-builder.cell validate cell.wcl
+//   ./cell-builder.cell build cell.wcl -o my-app.cell
+//
+// It carries the static `cell` tool, the static launcher it embeds in every
+// output, and an Alpine runtime with squashfs-tools and curl. Builds run in
+// a nested user namespace with one mapped id (no newuidmap inside), so
+// files a package manager gives to other users stay root-owned. The
+// launcher reports every image file as owned by the user, so that has no
+// effect at run time.
+app "dev.wiltaylor.cell-builder" {
+  name    = "Cell builder"
+  version = "0.1.0"
+
+  runtime {
+    base     = "oci://alpine:3.22"
+    packages = ["squashfs-tools", "curl", "ca-certificates"]
+  }
+
+  build {
+    copy { from = "../../target/x86_64-unknown-linux-musl/release/cell"          to = "/app/bin/cell" }
+    copy { from = "../../target/x86_64-unknown-linux-musl/release/cell-launcher" to = "/app/bin/cell-launcher" }
+  }
+
+  entry {
+    exec = ["/app/bin/cell"]
+    cwd  = "$PWD"
+  }
+
+  isolation {
+    network = true
+    home    = :host
+    // The directory the user runs the tool from, and the usual places for
+    // build inputs and outputs outside home.
+    bind "rw"  { host = "$PWD" guest = "$PWD" }
+    bind "rw"  { host = "/tmp" guest = "/tmp" }
+    bind "rw"  { host = "/mnt" guest = "/mnt" }
+    bind "rw"  { host = "/media" guest = "/media" }
+    bind "rw"  { host = "/run/media" guest = "/run/media" }
+    // Nested builds mount squashfs layers over FUSE.
+    bind "dev" { host = "/dev/fuse" guest = "/dev/fuse" optional = false }
+  }
+
+  integration {
+    gpu { enable = false }
+  }
+}

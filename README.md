@@ -29,6 +29,32 @@ This needs: a Rust toolchain with the `x86_64-unknown-linux-musl` target,
 namespace. `oci://` bases are pulled from the registry by the tool itself;
 `docker://` uses a local Docker instead.
 
+## The builder as a cell
+
+`examples/dist/cell-builder.cell` is the build tool packaged as a cell: the
+static `cell` tool, the launcher it embeds in every output, and an Alpine
+runtime with `mksquashfs` and `curl`. It needs no installation, no Docker,
+no `newuidmap` and no subordinate ids:
+
+```sh
+./cell-builder.cell validate cell.wcl
+./cell-builder.cell build cell.wcl -o my-app.cell
+```
+
+It starts in the directory you run it from and can see your home, `/tmp`,
+`/mnt`, `/media` and `/run/media`. Inside it, builds run in a nested user
+namespace with one mapped id, so files a package manager gives to other
+users stay root-owned; the launcher reports every image file as owned by
+the user, so that changes nothing at run time. Build it with
+`just example-build cell-builder`.
+
+## For agents
+
+`.claude/skills/cell/` is a Claude Code skill that writes `cell.wcl` files
+from recipes, builds them with the tool or the builder cell, runs the
+result and diagnoses failures. Copy the directory into another project's
+`.claude/skills/`, or point `CELL_BUILDER` at the builder cell.
+
 ## Make a cell
 
 ```sh
@@ -74,7 +100,8 @@ crates/cell-core      file format, squashfs reader, FUSE server, sandbox
 crates/cell-launcher  the static launcher (musl)
 crates/cell           the build tool (reads cell.wcl)
 schema/cell.wcl       the WCL schema for build files
-examples/             alpine-test, tuxracer, gl-tools, wine-doom; built into examples/dist/
+examples/             alpine-test, tuxracer, gl-tools, wine-doom, cell-builder; built into examples/dist/
+.claude/skills/cell   the agent skill
 tools/musl-cc         zig wrapper used as the musl C compiler
 ```
 
@@ -99,6 +126,7 @@ RTX 4060 with driver 615.71.09.
 | `examples/alpine-test` | 5 MiB | Entry point runs as the real user; FUSE layers, overlay, private `/dev`, `/tmp`, `/run` |
 | `examples/tuxracer` | 3 MiB + 268 MiB shared runtime | OpenGL 4.6 and Vulkan 1.4 on Intel through the runtime's Mesa; NVIDIA through the fetched 615.71.09 userspace (17 s first run) and through host libraries; a full race renders at 2560x1600; an audio stream reaches the host |
 | `examples/gl-tools` | 3 MiB + the same runtime | glxinfo, vulkaninfo, vkcube and eglinfo on the runtime file Tux Racer uses |
+| `examples/cell-builder` | 12 MiB | The build tool itself; built gl-tools and a fresh Arch runtime with pacman from inside its own sandbox |
 | `examples/wine-doom` | 767 MiB | Wine prefix created on first run; Minesweeper and Chocolate Doom (Freedoom) run through Wine with wined3d and DirectSound audio |
 
 Notes:

@@ -218,7 +218,13 @@ fn package_command(base: &Path, plan: &Plan) -> Option<String> {
     }
     let list = pk.join(" ");
     if base.join("usr/bin/pacman").exists() {
-        Some(format!("pacman -Syu --noconfirm --needed {list}"))
+        // pacman 7 downloads as the `alpm` user and chowns its download
+        // directory to it. Inside a build namespace with one mapped id
+        // that chown fails, so the sandbox download user is turned off.
+        Some(format!(
+            "sed -i -e 's/^DownloadUser/#DownloadUser/' -e 's/^#DisableSandbox/DisableSandbox/' /etc/pacman.conf; \
+             pacman -Syu --noconfirm --needed {list}"
+        ))
     } else if base.join("sbin/apk").exists() {
         Some(format!("apk add --no-cache {list}"))
     } else if base.join("usr/bin/apt-get").exists() {

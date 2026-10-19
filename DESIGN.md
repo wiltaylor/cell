@@ -612,6 +612,12 @@ sections above:
   writes `<layer>-<hash16>.layer` beside the output and reuses an existing
   one with the same name. The launcher resolves it through a search path.
   The name carries the hash; `CELL_CMD=verify` checks the full BLAKE3.
+- **The build tool runs inside a cell.** `cell-builder.cell` carries the
+  static tool and launcher on an Alpine runtime. Without `newuidmap` the
+  build namespace maps one id and runs as fake root; pacman's `alpm`
+  download user is turned off inside build sandboxes for that reason.
+  `$PWD` in `entry.cwd` and in bind paths lets a tool cell start where the
+  user is.
 - **Pid 1 of the sandbox is a small init**, as in bubblewrap. The entry
   point is its child. The init forwards signals, reaps orphans, and waits
   for daemons such as `wineserver` to finish after the entry point exits.

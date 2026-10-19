@@ -309,22 +309,39 @@ pub fn build_spec(
         }
     }
 
-    // Extra binds from the manifest.
+    // Extra binds from the manifest. `$PWD` in a path means the directory
+    // the user ran the cell from, so a tool cell can see its working
+    // directory wherever that is.
+    let host_cwd = std::env::current_dir()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_else(|_| "/".into());
     for b in &m.isolation.binds {
+        let host_path = b.host.replace("$PWD", &host_cwd);
+        let guest_path = b.guest.replace("$PWD", &host_cwd);
         spec.binds.push(BindSpec {
-            host: PathBuf::from(&b.host),
-            guest: b.guest.clone(),
+            host: PathBuf::from(&host_path),
+            guest: guest_path.clone(),
             mode: b.mode,
             optional: b.optional,
         });
-        report.push(format!("bind: {} -> {} ({:?})", b.host, b.guest, b.mode));
+        report.push(format!("bind: {host_path} -> {guest_path} ({:?})", b.mode));
     }
 
     // Entry point.
     for (k, v) in &m.entry.env {
         env(&mut spec, k, v.clone());
     }
-    spec.cwd = m.entry.cwd.clone();
+    // `$PWD` in `cwd` means the directory the user ran the cell from. It
+    // only works when that directory is visible inside (for example under
+    // a `home = :host` bind); otherwise the sandbox starts in `/`.
+    let host_cwd = std::env::current_dir()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_else(|_| "/".into());
+    let cwd = m.entry.cwd.as_ref().map(|c| c.replace("$PWD", &host_cwd));
+    if let Some(c) = &cwd {
+        env(&mut spec, "PWD", c.clone());
+    }
+    spec.cwd = cwd;
     spec.exec = exec_override.unwrap_or_else(|| m.entry.exec.clone());
     if m.entry.gamescope && std::env::var("CELL_NO_GAMESCOPE").is_err() {
         let mut g = vec!["gamescope".to_string(), "--".to_string()];
