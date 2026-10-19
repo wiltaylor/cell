@@ -14,6 +14,7 @@ use cell_core::format::{
 use cell_core::sandbox::{self, BindSpec, Layer, LayerSource, Spec};
 
 use crate::model::{BuildStep, Plan};
+use crate::unpack;
 
 pub struct Options {
     pub out: PathBuf,
@@ -40,11 +41,16 @@ fn status(msg: &str) {
 
 // ---- base ------------------------------------------------------------------
 
-/// Return a directory that holds the extracted base rootfs.
-fn base_rootfs(plan: &Plan, no_cache: bool) -> Result<PathBuf> {
+/// Return a directory that holds the extracted base rootfs, and a string
+/// that identifies its content for the runtime cache key.
+fn base_rootfs(plan: &Plan, no_cache: bool) -> Result<(PathBuf, String)> {
     let base = &plan.runtime.base;
     if let Some(d) = base.strip_prefix("dir://") {
-        return Ok(plan.root.join(d));
+        return Ok((plan.root.join(d), base.clone()));
+    }
+    if let Some(image) = base.strip_prefix("oci://") {
+        let (rootfs, digest) = crate::oci::rootfs(image, &plan.arch, no_cache)?;
+        return Ok((rootfs, format!("oci://{image}@{digest}")));
     }
     let cache = cell_core::host::cache_home().join("base");
     fs::create_dir_all(&cache)?;
@@ -53,12 +59,12 @@ fn base_rootfs(plan: &Plan, no_cache: bool) -> Result<PathBuf> {
     let stamp = cache.join(&key).join("ok");
     if stamp.exists() && !no_cache {
         status(&format!("base {base}: cached"));
-        return Ok(rootfs);
+        return Ok((rootfs, base.clone()));
     }
     let _ = fs::remove_dir_all(cache.join(&key));
     fs::create_dir_all(&rootfs)?;
     let tar_path = cache.join(&key).join("base.tar");
-    if let Some(image) = base.strip_prefix("oci://") {
+    if let Some(image) = base.strip_prefix("docker://") {
         status(&format!("base {base}: exporting with docker"));
         let out = Command::new("docker")
             .args(["create", "--pull=missing", image, "/bin/true"])
@@ -95,75 +101,13 @@ fn base_rootfs(plan: &Plan, no_cache: bool) -> Result<PathBuf> {
         bail!("unknown base scheme in {base}");
     }
     status("base: extracting");
-    extract_tar(&tar_path, &rootfs, base)?;
+    let reader = unpack::open_compressed(&tar_path, base)?;
+    // Arch bootstrap tarballs wrap everything in `root.x86_64/`.
+    let opts = unpack::Options { strip_root_dir: true, whiteouts: false };
+    unpack::unpack_tar(reader, &rootfs, &opts)?;
     let _ = fs::remove_file(&tar_path);
     fs::write(&stamp, b"ok")?;
-    Ok(rootfs)
-}
-
-fn extract_tar(tar_path: &Path, dest: &Path, name_hint: &str) -> Result<()> {
-    let f = fs::File::open(tar_path)?;
-    let mut magic = [0u8; 4];
-    let mut probe = fs::File::open(tar_path)?;
-    let _ = probe.read(&mut magic);
-    let reader: Box<dyn Read> = if magic[..4] == [0x28, 0xB5, 0x2F, 0xFD] || name_hint.ends_with(".zst") {
-        Box::new(zstd::stream::read::Decoder::new(f)?)
-    } else if magic[..2] == [0x1F, 0x8B] || name_hint.ends_with(".gz") {
-        Box::new(flate2::read::GzDecoder::new(f))
-    } else {
-        Box::new(f)
-    };
-    let mut ar = tar::Archive::new(reader);
-    ar.set_preserve_permissions(true);
-    ar.set_preserve_ownerships(true);
-    ar.set_unpack_xattrs(true);
-    ar.set_overwrite(true);
-    // Arch bootstrap tarballs wrap everything in `root.x86_64/`.
-    let entries = ar.entries()?;
-    for e in entries {
-        let mut e = e?;
-        let path = e.path()?.into_owned();
-        let rel: PathBuf = {
-            let mut comps = path.components();
-            let first = comps.next();
-            match first {
-                Some(c) if c.as_os_str().to_string_lossy().starts_with("root.") => {
-                    comps.as_path().to_path_buf()
-                }
-                _ => path.clone(),
-            }
-        };
-        if rel.as_os_str().is_empty() {
-            continue;
-        }
-        let target = dest.join(&rel);
-        if let Some(p) = target.parent() {
-            fs::create_dir_all(p)?;
-        }
-        if e.header().entry_type().is_hard_link() {
-            // tar-rs resolves hard links against the working directory;
-            // resolve them inside the destination instead.
-            let Some(link) = e.link_name()? else { continue };
-            let link_rel: PathBuf = {
-                let mut comps = link.components();
-                match comps.next() {
-                    Some(c) if c.as_os_str().to_string_lossy().starts_with("root.") => {
-                        comps.as_path().to_path_buf()
-                    }
-                    _ => link.into_owned(),
-                }
-            };
-            let _ = fs::remove_file(&target);
-            if let Err(err) = fs::hard_link(dest.join(&link_rel), &target) {
-                eprintln!("cell: warning: hard link {}: {err}", rel.display());
-            }
-            continue;
-        }
-        if let Err(err) = e.unpack(&target) {
-            eprintln!("cell: warning: {}: {err}", rel.display());
-        }
-    }
-    Ok(())
+    Ok((rootfs, base.clone()))
 }
 
 // ---- sandbox steps ----------------------------------------------------------
@@ -291,7 +235,7 @@ fn package_command(base: &Path, plan: &Plan) -> Option<String> {
 pub fn run_build(plan: &Plan, opts: &Options) -> Result<i32> {
     let work = cell_core::host::cache_home().join("build").join(&plan.id);
     fs::create_dir_all(&work)?;
-    let base = base_rootfs(plan, opts.no_cache)?;
+    let (base, base_id) = base_rootfs(plan, opts.no_cache)?;
 
     // Runtime layer.
     let mut setup = plan.runtime.setup.clone();
@@ -301,7 +245,9 @@ pub fn run_build(plan: &Plan, opts: &Options) -> Result<i32> {
             "sed -i '/^#\\[multilib\\]/,/^#Include/ s/^#//' /etc/pacman.conf; grep -q '^\\[multilib\\]' /etc/pacman.conf || printf '\\n[multilib]\\nInclude = /etc/pacman.d/mirrorlist\\n' >> /etc/pacman.conf".into(),
         );
     }
-    let mut key_parts: Vec<&str> = vec![&plan.runtime.base, &plan.arch];
+    // The key uses the resolved base identity, so a moved `oci://` tag
+    // makes a new runtime layer.
+    let mut key_parts: Vec<&str> = vec![&base_id, &plan.arch];
     let pk = plan.runtime.packages.join(" ");
     key_parts.push(&pk);
     let su = setup.join("\n");
