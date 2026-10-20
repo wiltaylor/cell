@@ -13,6 +13,10 @@ export function ServerPage() {
   const nav = useNavigate();
   const [server, { refetch }] = createResource(id, api.server);
   const [tab, setTab] = createSignal<Tab>("console");
+  const [joinArgs, setJoinArgs] = createSignal<string | null>(null);
+  const saveJoin = async () => {
+    try { await api.updateServer(id(), undefined, (joinArgs() ?? "").split(/\s+/).filter(Boolean)); notify("join arguments saved"); setJoinArgs(null); refetch(); } catch (e) { fail(e); }
+  };
   const timer = setInterval(() => refetch(), 3000);
   onCleanup(() => clearInterval(timer));
 
@@ -37,6 +41,11 @@ export function ServerPage() {
               <div class="muted small">
                 <Show when={s().state === "running"}>up {fmtSince(s().started_at)} · pid {s().pid} · </Show>
                 runs the {s().command === "server" ? "server command" : "entry point"} · created {fmtTime(s().created_at)}
+              </div>
+              <div class="row" style="gap:8px; margin-top:8px">
+                <span class="muted small">Join:</span>
+                <input class="input mono" style="width:320px" value={joinArgs() ?? s().join_args.join(" ")} placeholder="-n host:3979" onInput={(e) => setJoinArgs(e.currentTarget.value)} />
+                <Show when={joinArgs() !== null}><Button size="sm" variant="accent" onClick={saveJoin}>Save</Button></Show>
               </div>
             </div>
             <div class="btn-row">

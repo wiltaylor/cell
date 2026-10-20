@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/cell-core", "crates/cell-launcher", "crates/cell", "crates/cell-hub-api", "crates/cell-hub", "apps/launcher/src-tauri"]
+members = ["crates/cell-core", "crates/cell-launcher", "crates/cell", "crates/cell-hub-api", "crates/cell-hub", "crates/cell-identity", "apps/launcher/src-tauri"]
 
 [workspace.package]
 version = "0.1.0"

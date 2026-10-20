@@ -10,7 +10,13 @@ export interface HubGame {
 }
 export interface ServerInstance {
   id: string; game_id: string; game_name: string; name: string; state: "running" | "stopped"; pid: number | null;
-  started_at: number | null; created_at: number; log_seq: number; command: string;
+  started_at: number | null; created_at: number; log_seq: number; command: string; join_args: string[];
 }
+export interface ProfileView { name: string; pubkey: string; fingerprint: string; created_at: number; path: string }
+export interface HubIdentity { pubkey: string; fingerprint: string; name: string; needs_first_admin: boolean }
+export interface Member { pubkey: string; name: string; avatar: string | null; role: string; servers: string[]; added_at: number }
+export interface Peer { member: Member; online: boolean; status: string; game_id: string | null; last_seen: number | null }
+export interface PairResponse { member: Member; hub: HubIdentity }
+export interface GameInvite { id: string; from: Member; server_id: string | null; server_name: string; game_id: string; game_name: string; join_args: string[]; message: string; created_at: number }
 export interface Settings { games_dir: string; hub_url: string; hub_token: string }
 export interface Progress { id: string; file: string; done: number; total: number; finished: boolean; error: string | null }

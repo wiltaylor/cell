@@ -2,7 +2,7 @@ import { createMemo, createResource, createSignal, For, Show } from "solid-js";
 import { useNavigate, useParams } from "@solidjs/router";
 import { Badge, Button, fmtBytes, fmtTime } from "@cell/ui";
 import { invoke } from "@tauri-apps/api/core";
-import { art, fail, library, notify, refetchLibrary } from "../store";
+import { art, fail, library, notify, refetchLibrary, setCurrentGame } from "../store";
 
 export function GamePage() {
   const params = useParams();
@@ -15,7 +15,7 @@ export function GamePage() {
 
   const play = async (command: string | null) => {
     setMenu(false);
-    try { await invoke("play", { path: game()!.path, command }); notify(command ? `running ${command}` : `starting ${game()!.name}`); } catch (e) { fail(e); }
+    try { await invoke("play", { path: game()!.path, command, args: [] }); if (!command) setCurrentGame(game()!.id); notify(command ? `running ${command}` : `starting ${game()!.name}`); } catch (e) { fail(e); }
   };
   const cmd = async (what: string) => {
     try { setOut(await invoke<string>("cell_cmd", { path: game()!.path, what })); notify(`${what}: done`); } catch (e) { setOut(String(e)); fail(e); }

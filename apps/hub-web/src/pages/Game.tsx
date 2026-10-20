@@ -9,13 +9,14 @@ export function GamePage() {
   const nav = useNavigate();
   const [game, { refetch }] = createResource(() => params.id ?? "", api.game);
   const [serverName, setServerName] = createSignal("");
+  const [joinArgs, setJoinArgs] = createSignal("");
   const [busy, setBusy] = createSignal(false);
 
   const host = async () => {
     const g = game()!;
     setBusy(true);
     try {
-      const inst = await api.createServer(g.id, serverName() || `${g.name} server`);
+      const inst = await api.createServer(g.id, serverName() || `${g.name} server`, joinArgs().split(/\s+/).filter(Boolean));
       notify(`created ${inst.name}`);
       nav(`/servers/${inst.id}`);
     } catch (e) { fail(e); } finally { setBusy(false); }
@@ -94,6 +95,9 @@ export function GamePage() {
               </Show>
               <label class="field">Server name
                 <input class="input" placeholder={`${g().name} server`} value={serverName()} onInput={(e) => setServerName(e.currentTarget.value)} />
+              </label>
+              <label class="field" style="margin-top:8px">Join arguments (what players pass to the game)
+                <input class="input mono" placeholder="-n hub.example:3979" value={joinArgs()} onInput={(e) => setJoinArgs(e.currentTarget.value)} />
               </label>
               <div class="btn-row" style="margin-top:12px">
                 <Button variant="accent" onClick={host} disabled={busy()}>Create server</Button>

@@ -2,7 +2,7 @@ import { createResource, For, Show } from "solid-js";
 import { A, useNavigate } from "@solidjs/router";
 import { Badge, Cover, fmtBytes } from "@cell/ui";
 import { invoke } from "@tauri-apps/api/core";
-import { art, fail, library, notify, settings } from "../store";
+import { art, fail, library, notify, setCurrentGame, settings } from "../store";
 import type { LocalGame } from "../types";
 
 function GameCard(props: { g: LocalGame }) {
@@ -26,7 +26,7 @@ function Featured(props: { g: LocalGame }) {
   const [logo] = createResource(() => props.g.path, (p) => art(p, "logo"));
   const play = async (e: Event) => {
     e.preventDefault();
-    try { await invoke("play", { path: props.g.path, command: null }); notify(`starting ${props.g.name}`); } catch (err) { fail(err); }
+    try { await invoke("play", { path: props.g.path, command: null, args: [] }); setCurrentGame(props.g.id); notify(`starting ${props.g.name}`); } catch (err) { fail(err); }
   };
   return (
     <div class="featured">

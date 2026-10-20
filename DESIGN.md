@@ -623,6 +623,12 @@ sections above:
   desktop action per named command. `steam-add` edits Steam's binary
   `shortcuts.vdf` and writes the grid art under the crc32-derived app id.
   The art is PNG bytes in the manifest, declared in the build file.
+- **Identity is a keypair, not an account.** Launcher, CLI, web UI and
+  hub each hold an Ed25519 profile. Pairing signs `cell-pair:v1:<hub
+  key>:<code>`; sign-in signs `cell-login:v1:<hub key>:<nonce>` and gets a
+  session token. The export file is PBKDF2-SHA256 plus AES-256-GCM so a
+  browser reads it with WebCrypto. Peers pair through a hub by code; the
+  hub relays presence and game invites. No passphrase on the local key.
 - **Pid 1 of the sandbox is a small init**, as in bubblewrap. The entry
   point is its child. The init forwards signals, reaps orphans, and waits
   for daemons such as `wineserver` to finish after the entry point exits.

@@ -1,6 +1,6 @@
 import { A, RouteSectionProps } from "@solidjs/router";
 import { createResource, For, onMount, Show } from "solid-js";
-import { art, library, loadSettings, toast } from "./store";
+import { art, inbox, library, loadSettings, me, profile, toast } from "./store";
 
 function SideIcon(props: { path: string }) {
   const [src] = createResource(() => props.path, (p) => art(p, "icon"));
@@ -16,6 +16,8 @@ export function Layout(props: RouteSectionProps) {
         <A href="/" end activeClass="active">Library</A>
         <A href="/hub" activeClass="active">Hub</A>
         <A href="/servers" activeClass="active">Servers</A>
+        <A href="/peers" activeClass="active">Peers<Show when={inbox().length}><span class="badge on" style="margin-left:auto">{inbox().length}</span></Show></A>
+        <A href="/profile" activeClass="active"><Show when={profile()} fallback="Profile">{profile()!.name}<Show when={me()}><span class="muted small" style="margin-left:auto">{me()!.role}</span></Show></Show></A>
         <A href="/settings" activeClass="active">Settings</A>
         <div class="section">Games</div>
         <div class="games">

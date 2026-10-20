@@ -13,20 +13,26 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
-use cell_hub_api::{ApiError, ConsoleInput, CreateServer, FileContent, HubInfo};
+use cell_hub_api::{
+    ApiError, ChallengeRequest, ConsoleInput, CreateInvite, CreateServer, FileContent, HubInfo,
+    LoginRequest, PairPeer, PairRequest, PairResponse, Presence, SendInvite, UpdateMember,
+    UpdateServer,
+};
 use futures_util::{SinkExt, StreamExt};
 use serde::Deserialize;
 use tower_http::cors::CorsLayer;
 
+use crate::members::{Caller, Identity, Role};
 use crate::servers::Manager;
 use crate::store::{safe_name, Store};
 
-#[derive(Clone)]
 pub struct App {
     pub store: Store,
     pub servers: Manager,
+    /// Legacy admin token, for development. Sessions are the normal way in.
     pub token: Option<String>,
     pub name: String,
+    pub identity: Identity,
 }
 
 pub type Shared = Arc<App>;
@@ -53,21 +59,60 @@ impl From<anyhow::Error> for Fail {
 
 type R<T> = Result<Json<T>, Fail>;
 
-fn admin(app: &App, headers: &HeaderMap) -> Result<(), Fail> {
-    let Some(token) = &app.token else {
-        return Ok(());
-    };
-    let got = headers
+fn bearer(headers: &HeaderMap) -> Option<String> {
+    headers
         .get(header::AUTHORIZATION)
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.strip_prefix("Bearer "))
-        .unwrap_or("");
-    if got == token {
-        Ok(())
+        .map(|s| s.to_string())
+}
+
+/// Who is calling: a session token, or the legacy admin token.
+fn caller_from_token(app: &App, token: Option<&str>) -> Option<Caller> {
+    let token = token?;
+    if app.token.as_deref() == Some(token) {
+        return Some(Caller {
+            member: cell_hub_api::Member {
+                pubkey: String::new(),
+                name: "legacy-token".into(),
+                avatar: None,
+                role: "admin".into(),
+                servers: Vec::new(),
+                added_at: 0,
+            },
+            role: Role::Admin,
+        });
+    }
+    app.identity.caller_for_token(token)
+}
+
+fn caller(app: &App, headers: &HeaderMap) -> Result<Caller, Fail> {
+    caller_from_token(app, bearer(headers).as_deref()).ok_or_else(|| {
+        Fail(
+            StatusCode::UNAUTHORIZED,
+            "sign in with a paired profile".into(),
+        )
+    })
+}
+
+fn admin(app: &App, headers: &HeaderMap) -> Result<Caller, Fail> {
+    let c = caller(app, headers)?;
+    if c.role == Role::Admin {
+        Ok(c)
+    } else {
+        Err(Fail(StatusCode::FORBIDDEN, "admin role required".into()))
+    }
+}
+
+/// Admin, or an operator of this server.
+fn operator(app: &App, headers: &HeaderMap, server_id: &str) -> Result<Caller, Fail> {
+    let c = caller(app, headers)?;
+    if c.can_control(server_id) {
+        Ok(c)
     } else {
         Err(Fail(
-            StatusCode::UNAUTHORIZED,
-            "admin token required".into(),
+            StatusCode::FORBIDDEN,
+            "operator role for this server required".into(),
         ))
     }
 }
@@ -82,7 +127,9 @@ async fn info(State(app): State<Shared>) -> R<HubInfo> {
         games: app.store.list().len(),
         running: servers.iter().filter(|s| s.state == "running").count(),
         servers: servers.len(),
-        auth_required: app.token.is_some(),
+        auth_required: true,
+        pubkey: app.identity.hub_pubkey.clone(),
+        fingerprint: cell_identity::fingerprint(&app.identity.hub_pubkey),
     }))
 }
 
@@ -274,14 +321,20 @@ async fn upload_sidecar(
 
 // ---- servers ----------------------------------------------------------------------
 
-async fn servers(State(app): State<Shared>) -> R<Vec<cell_hub_api::ServerInstance>> {
+async fn servers(
+    State(app): State<Shared>,
+    headers: HeaderMap,
+) -> R<Vec<cell_hub_api::ServerInstance>> {
+    caller(&app, &headers)?;
     Ok(Json(app.servers.list().await))
 }
 
 async fn server(
     State(app): State<Shared>,
+    headers: HeaderMap,
     Path(id): Path<String>,
 ) -> R<cell_hub_api::ServerInstance> {
+    caller(&app, &headers)?;
     Ok(Json(app.servers.get(&id).await?))
 }
 
@@ -291,7 +344,23 @@ async fn server_create(
     Json(req): Json<CreateServer>,
 ) -> R<cell_hub_api::ServerInstance> {
     admin(&app, &headers)?;
-    Ok(Json(app.servers.create(&req.game_id, &req.name).await?))
+    Ok(Json(
+        app.servers
+            .create(&req.game_id, &req.name, req.join_args)
+            .await?,
+    ))
+}
+
+async fn server_update(
+    State(app): State<Shared>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(req): Json<UpdateServer>,
+) -> R<cell_hub_api::ServerInstance> {
+    operator(&app, &headers, &id)?;
+    Ok(Json(
+        app.servers.update(&id, req.name, req.join_args).await?,
+    ))
 }
 
 async fn server_delete(
@@ -309,7 +378,7 @@ async fn server_start(
     headers: HeaderMap,
     Path(id): Path<String>,
 ) -> R<cell_hub_api::ServerInstance> {
-    admin(&app, &headers)?;
+    operator(&app, &headers, &id)?;
     Ok(Json(app.servers.start(&id).await?))
 }
 
@@ -318,7 +387,7 @@ async fn server_stop(
     headers: HeaderMap,
     Path(id): Path<String>,
 ) -> R<cell_hub_api::ServerInstance> {
-    admin(&app, &headers)?;
+    operator(&app, &headers, &id)?;
     Ok(Json(app.servers.stop(&id).await?))
 }
 
@@ -327,7 +396,7 @@ async fn server_restart(
     headers: HeaderMap,
     Path(id): Path<String>,
 ) -> R<cell_hub_api::ServerInstance> {
-    admin(&app, &headers)?;
+    operator(&app, &headers, &id)?;
     app.servers.stop(&id).await?;
     Ok(Json(app.servers.start(&id).await?))
 }
@@ -345,9 +414,11 @@ fn default_limit() -> usize {
 
 async fn server_log(
     State(app): State<Shared>,
+    headers: HeaderMap,
     Path(id): Path<String>,
     Query(q): Query<LogQuery>,
 ) -> R<cell_hub_api::LogPage> {
+    caller(&app, &headers)?;
     Ok(Json(
         app.servers.log(&id, q.after, q.limit.min(3000)).await?,
     ))
@@ -359,7 +430,7 @@ async fn server_input(
     Path(id): Path<String>,
     Json(req): Json<ConsoleInput>,
 ) -> R<serde_json::Value> {
-    admin(&app, &headers)?;
+    operator(&app, &headers, &id)?;
     app.servers.input(&id, &req.line).await?;
     Ok(Json(serde_json::json!({ "ok": true })))
 }
@@ -372,10 +443,13 @@ async fn server_console(
     Query(q): Query<std::collections::HashMap<String, String>>,
     ws: WebSocketUpgrade,
 ) -> Result<Response, Fail> {
-    let token_ok = match &app.token {
-        None => true,
-        Some(t) => q.get("token") == Some(t),
-    };
+    let c = caller_from_token(&app, q.get("token").map(|s| s.as_str())).ok_or_else(|| {
+        Fail(
+            StatusCode::UNAUTHORIZED,
+            "sign in with a paired profile".into(),
+        )
+    })?;
+    let token_ok = c.can_control(&id);
     let (page, rx) = app.servers.subscribe(&id).await?;
     Ok(ws.on_upgrade(move |socket| console_session(socket, app, id, page, rx, token_ok)))
 }
@@ -430,17 +504,21 @@ struct PathQuery {
 
 async fn server_files(
     State(app): State<Shared>,
+    headers: HeaderMap,
     Path(id): Path<String>,
     Query(q): Query<PathQuery>,
 ) -> R<Vec<cell_hub_api::FileEntry>> {
+    operator(&app, &headers, &id)?;
     Ok(Json(app.servers.list_files(&id, &q.path).await?))
 }
 
 async fn server_file_get(
     State(app): State<Shared>,
+    headers: HeaderMap,
     Path(id): Path<String>,
     Query(q): Query<PathQuery>,
 ) -> R<FileContent> {
+    operator(&app, &headers, &id)?;
     let text = app.servers.read_file(&id, &q.path).await?;
     Ok(Json(FileContent { path: q.path, text }))
 }
@@ -451,15 +529,17 @@ async fn server_file_put(
     Path(id): Path<String>,
     Json(req): Json<FileContent>,
 ) -> R<serde_json::Value> {
-    admin(&app, &headers)?;
+    operator(&app, &headers, &id)?;
     app.servers.write_file(&id, &req.path, &req.text).await?;
     Ok(Json(serde_json::json!({ "ok": true })))
 }
 
 async fn backups(
     State(app): State<Shared>,
+    headers: HeaderMap,
     Path(id): Path<String>,
 ) -> R<Vec<cell_hub_api::Backup>> {
+    operator(&app, &headers, &id)?;
     Ok(Json(app.servers.backups(&id).await?))
 }
 
@@ -468,14 +548,23 @@ async fn backup_create(
     headers: HeaderMap,
     Path(id): Path<String>,
 ) -> R<cell_hub_api::Backup> {
-    admin(&app, &headers)?;
+    operator(&app, &headers, &id)?;
     Ok(Json(app.servers.backup(&id).await?))
 }
 
 async fn backup_download(
     State(app): State<Shared>,
+    headers: HeaderMap,
+    Query(q): Query<std::collections::HashMap<String, String>>,
     Path((id, name)): Path<(String, String)>,
 ) -> Result<Response, Fail> {
+    // Browsers cannot set headers on a link, so the token may come as a query.
+    let tok = bearer(&headers).or_else(|| q.get("token").cloned());
+    let c = caller_from_token(&app, tok.as_deref())
+        .ok_or_else(|| Fail(StatusCode::UNAUTHORIZED, "sign in".into()))?;
+    if !c.can_control(&id) {
+        return Err(Fail(StatusCode::FORBIDDEN, "operator role required".into()));
+    }
     let p = app.servers.backup_path(&id, &name)?;
     send_file(p, &name).await
 }
@@ -485,7 +574,7 @@ async fn backup_restore(
     headers: HeaderMap,
     Path((id, name)): Path<(String, String)>,
 ) -> R<serde_json::Value> {
-    admin(&app, &headers)?;
+    operator(&app, &headers, &id)?;
     app.servers.restore(&id, &name).await?;
     Ok(Json(serde_json::json!({ "ok": true })))
 }
@@ -495,8 +584,205 @@ async fn backup_delete(
     headers: HeaderMap,
     Path((id, name)): Path<(String, String)>,
 ) -> R<serde_json::Value> {
-    admin(&app, &headers)?;
+    operator(&app, &headers, &id)?;
     app.servers.delete_backup(&id, &name).await?;
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+// ---- identity, pairing, sessions -------------------------------------------------------
+
+async fn identity(State(app): State<Shared>) -> R<cell_hub_api::HubIdentity> {
+    Ok(Json(app.identity.hub_identity()))
+}
+
+async fn pair(State(app): State<Shared>, Json(req): Json<PairRequest>) -> R<PairResponse> {
+    let member = app.identity.pair(&req)?;
+    Ok(Json(PairResponse {
+        member,
+        hub: app.identity.hub_identity(),
+    }))
+}
+
+async fn auth_challenge(
+    State(app): State<Shared>,
+    Json(req): Json<ChallengeRequest>,
+) -> R<cell_hub_api::Challenge> {
+    Ok(Json(app.identity.challenge(&req.pubkey)?))
+}
+
+async fn auth_login(
+    State(app): State<Shared>,
+    Json(req): Json<LoginRequest>,
+) -> R<cell_hub_api::Session> {
+    Ok(Json(app.identity.login(&req)?))
+}
+
+async fn auth_logout(State(app): State<Shared>, headers: HeaderMap) -> R<serde_json::Value> {
+    if let Some(t) = bearer(&headers) {
+        app.identity.logout(&t)?;
+    }
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+async fn me(State(app): State<Shared>, headers: HeaderMap) -> R<cell_hub_api::Member> {
+    Ok(Json(caller(&app, &headers)?.member))
+}
+
+async fn members(State(app): State<Shared>, headers: HeaderMap) -> R<Vec<cell_hub_api::Member>> {
+    admin(&app, &headers)?;
+    Ok(Json(app.identity.members()))
+}
+
+async fn member_update(
+    State(app): State<Shared>,
+    headers: HeaderMap,
+    Path(pubkey): Path<String>,
+    Json(req): Json<UpdateMember>,
+) -> R<cell_hub_api::Member> {
+    admin(&app, &headers)?;
+    let role = match req.role.as_deref() {
+        Some(r) => Some(Role::parse(r).ok_or_else(|| {
+            Fail(
+                StatusCode::BAD_REQUEST,
+                "role is admin, operator or member".into(),
+            )
+        })?),
+        None => None,
+    };
+    Ok(Json(app.identity.update_member(
+        &pubkey,
+        role,
+        req.servers,
+    )?))
+}
+
+async fn member_delete(
+    State(app): State<Shared>,
+    headers: HeaderMap,
+    Path(pubkey): Path<String>,
+) -> R<serde_json::Value> {
+    let c = admin(&app, &headers)?;
+    if c.member.pubkey == pubkey {
+        return Err(Fail(
+            StatusCode::BAD_REQUEST,
+            "you cannot remove yourself".into(),
+        ));
+    }
+    app.identity.remove_member(&pubkey)?;
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+async fn invites(
+    State(app): State<Shared>,
+    headers: HeaderMap,
+) -> R<Vec<cell_hub_api::InviteCode>> {
+    admin(&app, &headers)?;
+    Ok(Json(app.identity.invites()))
+}
+
+async fn invite_create(
+    State(app): State<Shared>,
+    headers: HeaderMap,
+    Json(req): Json<CreateInvite>,
+) -> R<cell_hub_api::InviteCode> {
+    admin(&app, &headers)?;
+    let role = Role::parse(&req.role).ok_or_else(|| {
+        Fail(
+            StatusCode::BAD_REQUEST,
+            "role is admin, operator or member".into(),
+        )
+    })?;
+    Ok(Json(app.identity.create_invite(role, req.servers)?))
+}
+
+// ---- presence and peers ----------------------------------------------------------------
+
+async fn presence(
+    State(app): State<Shared>,
+    headers: HeaderMap,
+    Json(p): Json<Presence>,
+) -> R<serde_json::Value> {
+    let c = caller(&app, &headers)?;
+    app.identity.set_presence(&c.member.pubkey, p);
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+async fn peers(State(app): State<Shared>, headers: HeaderMap) -> R<Vec<cell_hub_api::Peer>> {
+    let c = caller(&app, &headers)?;
+    Ok(Json(app.identity.peers(&c.member.pubkey)))
+}
+
+async fn peer_code(State(app): State<Shared>, headers: HeaderMap) -> R<cell_hub_api::PeerCode> {
+    let c = caller(&app, &headers)?;
+    Ok(Json(app.identity.peer_code(&c.member.pubkey)))
+}
+
+async fn peer_pair(
+    State(app): State<Shared>,
+    headers: HeaderMap,
+    Json(req): Json<PairPeer>,
+) -> R<cell_hub_api::Member> {
+    let c = caller(&app, &headers)?;
+    Ok(Json(app.identity.pair_peer(&c.member.pubkey, &req.code)?))
+}
+
+async fn peer_remove(
+    State(app): State<Shared>,
+    headers: HeaderMap,
+    Path(pubkey): Path<String>,
+) -> R<serde_json::Value> {
+    let c = caller(&app, &headers)?;
+    app.identity.remove_peer(&c.member.pubkey, &pubkey)?;
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+async fn invite_send(
+    State(app): State<Shared>,
+    headers: HeaderMap,
+    Json(req): Json<SendInvite>,
+) -> R<serde_json::Value> {
+    let c = caller(&app, &headers)?;
+    if !app.identity.is_peer(&c.member.pubkey, &req.to) {
+        return Err(Fail(
+            StatusCode::FORBIDDEN,
+            "you can only invite paired peers".into(),
+        ));
+    }
+    let (server_name, game_id, game_name, join_args) = match &req.server_id {
+        Some(id) => {
+            let rec = app.servers.record(id).await?;
+            let game = app.store.load(&rec.game_id)?;
+            (rec.name, rec.game_id, game.name, rec.join_args)
+        }
+        None => (String::new(), String::new(), String::new(), Vec::new()),
+    };
+    let invite = cell_hub_api::GameInvite {
+        id: cell_identity::random_token(),
+        from: c.member.clone(),
+        server_id: req.server_id.clone(),
+        server_name,
+        game_id,
+        game_name,
+        join_args,
+        message: req.message.clone(),
+        created_at: crate::store::now(),
+    };
+    app.identity.push_invite(&req.to, invite);
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+async fn inbox(State(app): State<Shared>, headers: HeaderMap) -> R<Vec<cell_hub_api::GameInvite>> {
+    let c = caller(&app, &headers)?;
+    Ok(Json(app.identity.inbox(&c.member.pubkey)))
+}
+
+async fn inbox_dismiss(
+    State(app): State<Shared>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> R<serde_json::Value> {
+    let c = caller(&app, &headers)?;
+    app.identity.dismiss(&c.member.pubkey, &id);
     Ok(Json(serde_json::json!({ "ok": true })))
 }
 
@@ -533,8 +819,31 @@ pub fn router(app: Shared) -> Router {
         .route("/api/games/{id}/sidecar", post(upload_sidecar))
         .route("/api/layers", post(upload_layer))
         .route("/api/layers/{file}", get(layer))
+        .route("/api/identity", get(identity))
+        .route("/api/pair", post(pair))
+        .route("/api/auth/challenge", post(auth_challenge))
+        .route("/api/auth/login", post(auth_login))
+        .route("/api/auth/logout", post(auth_logout))
+        .route("/api/me", get(me))
+        .route("/api/members", get(members))
+        .route(
+            "/api/members/{pubkey}",
+            axum::routing::patch(member_update).delete(member_delete),
+        )
+        .route("/api/invites", get(invites).post(invite_create))
+        .route("/api/presence", post(presence))
+        .route("/api/peers", get(peers))
+        .route("/api/peers/code", post(peer_code))
+        .route("/api/peers/pair", post(peer_pair))
+        .route("/api/peers/{pubkey}", axum::routing::delete(peer_remove))
+        .route("/api/peers/invite", post(invite_send))
+        .route("/api/inbox", get(inbox))
+        .route("/api/inbox/{id}", axum::routing::delete(inbox_dismiss))
         .route("/api/servers", get(servers).post(server_create))
-        .route("/api/servers/{id}", get(server).delete(server_delete))
+        .route(
+            "/api/servers/{id}",
+            get(server).patch(server_update).delete(server_delete),
+        )
         .route("/api/servers/{id}/start", post(server_start))
         .route("/api/servers/{id}/stop", post(server_stop))
         .route("/api/servers/{id}/restart", post(server_restart))

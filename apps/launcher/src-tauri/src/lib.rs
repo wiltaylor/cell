@@ -14,6 +14,8 @@ use tauri::{AppHandle, Emitter, Manager};
 pub struct Settings {
     pub games_dir: String,
     pub hub_url: String,
+    /// Legacy admin token; sessions from the profile are the normal way in.
+    #[serde(default)]
     pub hub_token: String,
 }
 
@@ -243,10 +245,279 @@ fn remove_game(path: String) -> Result<(), String> {
     std::fs::remove_file(&path).map_err(|e| e.to_string())
 }
 
+// ---- profile ---------------------------------------------------------------------
+
+use cell_identity::{client::profile_path, fingerprint, Profile};
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ProfileView {
+    pub name: String,
+    pub pubkey: String,
+    pub fingerprint: String,
+    pub created_at: u64,
+    pub path: String,
+}
+
+fn view(p: &Profile) -> Result<ProfileView, String> {
+    let pubkey = p.pubkey().map_err(|e| e.to_string())?;
+    Ok(ProfileView {
+        name: p.name.clone(),
+        fingerprint: fingerprint(&pubkey),
+        pubkey,
+        created_at: p.created_at,
+        path: profile_path().to_string_lossy().to_string(),
+    })
+}
+
+#[tauri::command]
+fn profile_get() -> Result<Option<ProfileView>, String> {
+    let p = profile_path();
+    if !p.exists() {
+        return Ok(None);
+    }
+    Ok(Some(view(&Profile::load(&p).map_err(|e| e.to_string())?)?))
+}
+
+#[tauri::command]
+fn profile_create(name: String) -> Result<ProfileView, String> {
+    let path = profile_path();
+    if path.exists() {
+        return Err("a profile already exists".into());
+    }
+    let p = Profile::generate(name.trim());
+    p.save(&path).map_err(|e| e.to_string())?;
+    view(&p)
+}
+
+#[tauri::command]
+fn profile_import(file: String, passphrase: String) -> Result<ProfileView, String> {
+    let path = profile_path();
+    if path.exists() {
+        return Err("a profile already exists; forget it first".into());
+    }
+    let text = std::fs::read_to_string(&file).map_err(|e| e.to_string())?;
+    let p = Profile::import(&text, &passphrase).map_err(|e| e.to_string())?;
+    p.save(&path).map_err(|e| e.to_string())?;
+    view(&p)
+}
+
+#[tauri::command]
+fn profile_export(file: String, passphrase: String) -> Result<(), String> {
+    let p = Profile::load(&profile_path()).map_err(|e| e.to_string())?;
+    std::fs::write(&file, p.export(&passphrase).map_err(|e| e.to_string())?)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn profile_forget() -> Result<(), String> {
+    let p = profile_path();
+    if p.exists() {
+        std::fs::remove_file(&p).map_err(|e| e.to_string())?;
+    }
+    let _ = std::fs::remove_file(cell_identity::client::sessions_path());
+    Ok(())
+}
+
 // ---- hub -----------------------------------------------------------------------
 
 fn client() -> reqwest::Client {
     reqwest::Client::builder().build().unwrap()
+}
+
+async fn fail_of(resp: reqwest::Response) -> String {
+    let status = resp.status();
+    let text = resp.text().await.unwrap_or_default();
+    serde_json::from_str::<cell_hub_api::ApiError>(&text)
+        .map(|e| e.error)
+        .unwrap_or_else(|_| format!("{status} {text}"))
+}
+
+async fn get_json<T: serde::de::DeserializeOwned>(
+    url: String,
+    token: Option<&str>,
+) -> Result<T, String> {
+    let mut r = client().get(url);
+    if let Some(t) = token {
+        r = r.bearer_auth(t);
+    }
+    let resp = r.send().await.map_err(|e| e.to_string())?;
+    if !resp.status().is_success() {
+        return Err(fail_of(resp).await);
+    }
+    resp.json().await.map_err(|e| e.to_string())
+}
+
+async fn post_json<T: serde::de::DeserializeOwned>(
+    url: String,
+    token: Option<&str>,
+    body: serde_json::Value,
+) -> Result<T, String> {
+    let mut r = client().post(url).json(&body);
+    if let Some(t) = token {
+        r = r.bearer_auth(t);
+    }
+    let resp = r.send().await.map_err(|e| e.to_string())?;
+    if !resp.status().is_success() {
+        return Err(fail_of(resp).await);
+    }
+    resp.json().await.map_err(|e| e.to_string())
+}
+
+fn base(url: &str) -> String {
+    url.trim_end_matches('/').to_string()
+}
+
+#[tauri::command]
+async fn hub_identity(url: String) -> Result<cell_hub_api::HubIdentity, String> {
+    get_json(format!("{}/api/identity", base(&url)), None).await
+}
+
+/// Sign in with the profile and return a session token. Cached per hub.
+async fn session_token(url: &str, fresh: bool) -> Result<String, String> {
+    let url = base(url);
+    let mut sessions = cell_identity::client::Sessions::load();
+    if !fresh {
+        if let Some(t) = sessions.by_hub.get(&url) {
+            if get_json::<cell_hub_api::Member>(format!("{url}/api/me"), Some(t))
+                .await
+                .is_ok()
+            {
+                return Ok(t.clone());
+            }
+        }
+    }
+    let profile = Profile::load(&profile_path()).map_err(|_| "no profile yet".to_string())?;
+    let hub: cell_hub_api::HubIdentity = get_json(format!("{url}/api/identity"), None).await?;
+    let pubkey = profile.pubkey().map_err(|e| e.to_string())?;
+    let ch: cell_hub_api::Challenge = post_json(
+        format!("{url}/api/auth/challenge"),
+        None,
+        serde_json::json!({ "pubkey": pubkey }),
+    )
+    .await?;
+    let sig = profile
+        .sign(&cell_identity::login_message(&hub.pubkey, &ch.nonce))
+        .map_err(|e| e.to_string())?;
+    let s: cell_hub_api::Session = post_json(
+        format!("{url}/api/auth/login"),
+        None,
+        serde_json::json!({ "pubkey": pubkey, "nonce": ch.nonce, "signature": sig }),
+    )
+    .await?;
+    sessions.by_hub.insert(url, s.token.clone());
+    sessions.save().map_err(|e| e.to_string())?;
+    Ok(s.token)
+}
+
+#[tauri::command]
+async fn hub_me(url: String) -> Result<Option<cell_hub_api::Member>, String> {
+    if !profile_path().exists() {
+        return Ok(None);
+    }
+    match session_token(&url, false).await {
+        Ok(t) => Ok(get_json(format!("{}/api/me", base(&url)), Some(&t))
+            .await
+            .ok()),
+        Err(_) => Ok(None),
+    }
+}
+
+#[tauri::command]
+async fn hub_pair(url: String, code: String) -> Result<cell_hub_api::PairResponse, String> {
+    let profile = Profile::load(&profile_path()).map_err(|_| "make a profile first".to_string())?;
+    let url = base(&url);
+    let hub: cell_hub_api::HubIdentity = get_json(format!("{url}/api/identity"), None).await?;
+    let code = cell_identity::normalize_code(&code);
+    let pubkey = profile.pubkey().map_err(|e| e.to_string())?;
+    let sig = profile
+        .sign(&cell_identity::pair_message(&hub.pubkey, &code))
+        .map_err(|e| e.to_string())?;
+    let out: cell_hub_api::PairResponse = post_json(
+        format!("{url}/api/pair"),
+        None,
+        serde_json::json!({ "code": code, "pubkey": pubkey, "name": profile.name, "avatar": profile.avatar, "signature": sig }),
+    )
+    .await?;
+    session_token(&url, true).await?;
+    Ok(out)
+}
+
+#[tauri::command]
+async fn hub_presence(url: String, status: String, game_id: Option<String>) -> Result<(), String> {
+    let t = session_token(&url, false).await?;
+    let _: serde_json::Value = post_json(
+        format!("{}/api/presence", base(&url)),
+        Some(&t),
+        serde_json::json!({ "status": status, "game_id": game_id }),
+    )
+    .await?;
+    Ok(())
+}
+
+#[tauri::command]
+async fn hub_peers(url: String) -> Result<Vec<cell_hub_api::Peer>, String> {
+    let t = session_token(&url, false).await?;
+    get_json(format!("{}/api/peers", base(&url)), Some(&t)).await
+}
+
+#[tauri::command]
+async fn hub_peer_code(url: String) -> Result<cell_hub_api::PeerCode, String> {
+    let t = session_token(&url, false).await?;
+    post_json(
+        format!("{}/api/peers/code", base(&url)),
+        Some(&t),
+        serde_json::json!({}),
+    )
+    .await
+}
+
+#[tauri::command]
+async fn hub_peer_pair(url: String, code: String) -> Result<cell_hub_api::Member, String> {
+    let t = session_token(&url, false).await?;
+    post_json(
+        format!("{}/api/peers/pair", base(&url)),
+        Some(&t),
+        serde_json::json!({ "code": code }),
+    )
+    .await
+}
+
+#[tauri::command]
+async fn hub_invite(
+    url: String,
+    to: String,
+    server_id: Option<String>,
+    message: String,
+) -> Result<(), String> {
+    let t = session_token(&url, false).await?;
+    let _: serde_json::Value = post_json(
+        format!("{}/api/peers/invite", base(&url)),
+        Some(&t),
+        serde_json::json!({ "to": to, "server_id": server_id, "message": message }),
+    )
+    .await?;
+    Ok(())
+}
+
+#[tauri::command]
+async fn hub_inbox(url: String) -> Result<Vec<cell_hub_api::GameInvite>, String> {
+    let t = session_token(&url, false).await?;
+    get_json(format!("{}/api/inbox", base(&url)), Some(&t)).await
+}
+
+#[tauri::command]
+async fn hub_dismiss(url: String, id: String) -> Result<(), String> {
+    let t = session_token(&url, false).await?;
+    let resp = client()
+        .delete(format!("{}/api/inbox/{id}", base(&url)))
+        .bearer_auth(&t)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    if !resp.status().is_success() {
+        return Err(fail_of(resp).await);
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -265,16 +536,8 @@ async fn hub_games(url: String) -> Result<Vec<Game>, String> {
 
 #[tauri::command]
 async fn hub_servers(url: String) -> Result<Vec<ServerInstance>, String> {
-    client()
-        .get(format!("{}/api/servers", url.trim_end_matches('/')))
-        .send()
-        .await
-        .map_err(|e| e.to_string())?
-        .error_for_status()
-        .map_err(|e| e.to_string())?
-        .json()
-        .await
-        .map_err(|e| e.to_string())
+    let t = session_token(&url, false).await?;
+    get_json(format!("{}/api/servers", base(&url)), Some(&t)).await
 }
 
 #[derive(Clone, Serialize)]
@@ -453,6 +716,11 @@ async fn hub_download(
 /// Upload a local cell and its referenced layers to the hub.
 #[tauri::command]
 async fn hub_upload(url: String, token: String, path: String) -> Result<Game, String> {
+    let token = if token.is_empty() {
+        session_token(&url, false).await?
+    } else {
+        token
+    };
     let base = url.trim_end_matches('/').to_string();
     let cell = CellFile::open(Path::new(&path)).map_err(|e| e.to_string())?;
     let send = |api: String, local: PathBuf, name: String| {
@@ -507,6 +775,21 @@ pub fn run() {
             hub_servers,
             hub_download,
             hub_upload,
+            profile_get,
+            profile_create,
+            profile_import,
+            profile_export,
+            profile_forget,
+            hub_identity,
+            hub_me,
+            hub_pair,
+            hub_presence,
+            hub_peers,
+            hub_peer_code,
+            hub_peer_pair,
+            hub_invite,
+            hub_inbox,
+            hub_dismiss,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

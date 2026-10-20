@@ -20,6 +20,7 @@ serde_json = "1"
 anyhow.workspace = true
 cell-core = { path = "../../../crates/cell-core" }
 cell-hub-api = { path = "../../../crates/cell-hub-api" }
+cell-identity = { path = "../../../crates/cell-identity" }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
 tokio = { version = "1", features = ["fs", "io-util"] }
 futures-util = "0.3"

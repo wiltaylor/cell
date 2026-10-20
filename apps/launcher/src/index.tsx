@@ -9,6 +9,8 @@ import { GamePage } from "./pages/Game";
 import { Hub } from "./pages/Hub";
 import { Servers } from "./pages/Servers";
 import { SettingsPage } from "./pages/Settings";
+import { ProfilePage } from "./pages/Profile";
+import { Peers } from "./pages/Peers";
 
 render(
   () => (
@@ -18,6 +20,8 @@ render(
       <Route path="/hub" component={Hub} />
       <Route path="/servers" component={Servers} />
       <Route path="/settings" component={SettingsPage} />
+      <Route path="/profile" component={ProfilePage} />
+      <Route path="/peers" component={Peers} />
     </Router>
   ),
   document.getElementById("root")!,

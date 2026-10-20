@@ -19,3 +19,6 @@
 | `MESA-EGL: warning: pci id for fd ...: 10de:28a0, driver (null)` | Mesa probing an NVIDIA node | Harmless on hybrid laptops |
 | `DirectSoundCreate8 ... 0x80040154` in an old Wine prefix | Registry lost before the init fix | Delete the prefix in the state dir (ask first) and run again |
 | Files shown as owned by `nobody` or by the user | Expected: the namespace maps one uid | Nothing; permission bits still apply |
+| `sign in with a paired profile` (401 from a hub) | The call needs a session | `cell-hub profile init --name you`, then `cell-hub pair --url <hub> <code>`; the launcher and web UI pair on their Profile page |
+| `operator role for this server required` | The member's role does not cover that server | An admin raises the role on the Members page or makes an operator invite with `--servers` |
+| `unknown or expired invite code` | Codes are single use and last one hour | Make a new one: `cell-hub invite --role member` or the Members page |

@@ -383,8 +383,8 @@ format and look.
 Rust backend) is a desktop library for cells. It scans a games folder,
 shows each cell with its artwork and grants, starts games and their named
 commands, registers them with the desktop or Steam, and browses a hub:
-install games with progress, upload local cells, and see the hub's game
-servers. Build and run it with `just launcher-app-run`. Settings (games
+install games with progress, upload local cells, see and join the hub's
+game servers, pair with peers, and accept their invites. Build and run it with `just launcher-app-run`. Settings (games
 folder, hub URL, token) live in the app config directory.
 
 **Cell Hub** (`crates/cell-hub`, axum) is the server side:
@@ -406,9 +406,44 @@ cell-hub upload examples/dist/openttd.cell
 cell-hub console                          # terminal console
 ```
 
-Admin calls need `Authorization: Bearer <token>` when the hub was started
-with `--token` or `CELL_HUB_TOKEN`. Downloads and listings are open. The
-API is plain JSON under `/api`; `crates/cell-hub-api` holds the types.
+### Profiles instead of accounts
+
+There are no user accounts. A **profile** is an Ed25519 keypair with a
+display name, kept on your machine (`~/.config/cell/profile.json` for the
+launcher and the CLI, the browser's local storage for the web UI). The
+public key is your identity on every hub and with every peer. Nothing to
+sign up for and no password to type: the only passphrase is on the export
+file, `name.cellprofile`, which moves a profile to another machine or
+browser. Lose the file and the passphrase and you pair again; there is no
+authority to run a reset.
+
+A hub has a profile too and shows its fingerprint. Pairing is a code
+exchange:
+
+```sh
+cell-hub serve --data ./hub-data        # prints "no admin yet ... invite code: K7F3-9Q2M"
+cell-hub profile init --name Wil
+cell-hub pair --url http://hub:8787 K7F3-9Q2M     # first pairing becomes the admin
+cell-hub invite --role member            # more codes: admin, operator (named servers), member
+cell-hub console                         # signs in with the profile
+```
+
+The client signs the code and the hub's public key; the hub stores the
+member with the invite's role. Later calls sign a challenge and get a
+session token. Roles: `admin` manages the catalog, members and servers;
+`operator` controls the servers named on its invite; `member` downloads,
+sees servers, and pairs with peers. A legacy `--token` still works as an
+admin bearer for scripts.
+
+**Peers.** Two members pair by exchanging a short code through the hub:
+one makes it on the Peers page, the other enters it. Paired peers see each
+other's presence (online, in a game) and can send invites to a hosted
+server. An invite carries the server's join arguments, so the launcher's
+Join button starts the game straight into it. There is no file transfer
+between peers in this cut.
+
+The API is plain JSON under `/api`; `crates/cell-hub-api` holds the types
+and `crates/cell-identity` the keys, codes and export format.
 
 A game server is a normal cell. `examples/openttd` declares the client as
 the entry point and `command "server" { exec = ["openttd", "-D"] }` for the
@@ -464,6 +499,7 @@ The workspace has three crates:
 | `cell` | The build tool: reads `cell.wcl` through the WCL crate, pulls OCI images, runs builds in a user namespace, packs and assembles |
 | `cell-hub` | The hub server, its web UI (embedded from `apps/hub-web`) and the terminal console |
 | `cell-hub-api` | JSON types shared by the hub, the console and the launcher |
+| `cell-identity` | Profiles: Ed25519 keys, invite codes, signed challenges, passphrase-protected export; the blocking client for pairing and sign-in |
 | `apps/launcher/src-tauri` | The desktop launcher's Rust backend |
 
 The WCL dependency is pinned to a git revision of

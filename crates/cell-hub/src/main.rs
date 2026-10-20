@@ -4,13 +4,14 @@
 
 mod api;
 mod console;
+mod members;
 mod servers;
 mod store;
 
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
@@ -22,6 +23,29 @@ use clap::{Parser, Subcommand};
 struct Cli {
     #[command(subcommand)]
     cmd: Cmd,
+}
+
+#[derive(Subcommand)]
+enum ProfileCmd {
+    /// Create a profile (refuses to overwrite one).
+    Init {
+        #[arg(long)]
+        name: String,
+    },
+    /// Show the profile's name, public key and fingerprint.
+    Show,
+    /// Export the profile to a passphrase-protected file.
+    Export {
+        file: PathBuf,
+        #[arg(long, env = "CELL_PROFILE_PASSPHRASE")]
+        passphrase: String,
+    },
+    /// Import a profile from an export file (refuses to overwrite one).
+    Import {
+        file: PathBuf,
+        #[arg(long, env = "CELL_PROFILE_PASSPHRASE")]
+        passphrase: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -41,13 +65,36 @@ enum Cmd {
         #[arg(long, default_value = "Cell Hub", env = "CELL_HUB_NAME")]
         name: String,
     },
-    /// Terminal console for the game servers of a hub.
+    /// Terminal console for the game servers of a hub. Signs in with your profile.
     Console {
         /// Hub URL.
         #[arg(long, default_value = "http://127.0.0.1:8787", env = "CELL_HUB_URL")]
         url: String,
+        /// A legacy admin token instead of the profile.
         #[arg(long, env = "CELL_HUB_TOKEN")]
         token: Option<String>,
+    },
+    /// Your profile: the keypair that identifies you to hubs and peers.
+    Profile {
+        #[command(subcommand)]
+        cmd: ProfileCmd,
+    },
+    /// Pair your profile with a hub using an invite code.
+    Pair {
+        #[arg(long, default_value = "http://127.0.0.1:8787", env = "CELL_HUB_URL")]
+        url: String,
+        code: String,
+    },
+    /// Make an invite code for a new member of this hub (reads the data directory).
+    Invite {
+        /// `admin`, `operator` or `member`.
+        #[arg(long, default_value = "member")]
+        role: String,
+        /// Server ids an operator may control, comma separated.
+        #[arg(long, default_value = "")]
+        servers: String,
+        #[arg(long, default_value = "./hub-data", env = "CELL_HUB_DATA")]
+        data: PathBuf,
     },
     /// Upload a cell (and its referenced layers from the same directory) to a hub.
     Upload {
@@ -68,9 +115,101 @@ fn main() -> Result<()> {
             token,
             name,
         } => serve(listen, data, token, name),
-        Cmd::Console { url, token } => console::run(&url, token),
+        Cmd::Console { url, token } => {
+            let token = match token {
+                Some(t) => t,
+                None => {
+                    cell_identity::client::token_for(&url, &cell_identity::client::profile_path())?
+                }
+            };
+            console::run(&url, Some(token))
+        }
+        Cmd::Profile { cmd } => profile_cmd(cmd),
+        Cmd::Pair { url, code } => {
+            let path = cell_identity::client::profile_path();
+            let profile = cell_identity::Profile::load(&path).with_context(|| {
+                format!(
+                    "no profile at {} (run `cell-hub profile init --name <you>`)",
+                    path.display()
+                )
+            })?;
+            let hub = cell_identity::client::pair(&url, &code, &profile)?;
+            println!("paired with {} ({})", hub.name, hub.fingerprint);
+            let s = cell_identity::client::login(&url, &profile)?;
+            let mut sessions = cell_identity::client::Sessions::load();
+            sessions
+                .by_hub
+                .insert(url.trim_end_matches('/').to_string(), s.token);
+            sessions.save()?;
+            println!("signed in; session saved");
+            Ok(())
+        }
+        Cmd::Invite {
+            role,
+            servers,
+            data,
+        } => {
+            let id = members::Identity::open(&data, "Cell Hub")?;
+            let role = members::Role::parse(&role)
+                .ok_or_else(|| anyhow::anyhow!("role is admin, operator or member"))?;
+            let servers: Vec<String> = servers
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect();
+            let inv = id.create_invite(role, servers)?;
+            println!("{}", inv.code);
+            eprintln!(
+                "invite for a new {} of hub {} (expires in 1 h)",
+                inv.role,
+                cell_identity::fingerprint(&id.hub_pubkey)
+            );
+            Ok(())
+        }
         Cmd::Upload { file, url, token } => upload(&file, &url, token),
     }
+}
+
+fn profile_cmd(cmd: ProfileCmd) -> Result<()> {
+    use cell_identity::{client::profile_path, fingerprint, Profile};
+    let path = profile_path();
+    match cmd {
+        ProfileCmd::Init { name } => {
+            if path.exists() {
+                anyhow::bail!("a profile already exists at {}", path.display());
+            }
+            let p = Profile::generate(&name);
+            p.save(&path)?;
+            println!(
+                "created {} for {} ({})",
+                path.display(),
+                p.name,
+                fingerprint(&p.pubkey()?)
+            );
+        }
+        ProfileCmd::Show => {
+            let p = Profile::load(&path)?;
+            println!("name:        {}", p.name);
+            println!("public key:  {}", p.pubkey()?);
+            println!("fingerprint: {}", fingerprint(&p.pubkey()?));
+            println!("file:        {}", path.display());
+        }
+        ProfileCmd::Export { file, passphrase } => {
+            let p = Profile::load(&path)?;
+            std::fs::write(&file, p.export(&passphrase)?)?;
+            println!("exported to {}", file.display());
+        }
+        ProfileCmd::Import { file, passphrase } => {
+            if path.exists() {
+                anyhow::bail!("a profile already exists at {}", path.display());
+            }
+            let text = std::fs::read_to_string(&file)?;
+            let p = Profile::import(&text, &passphrase)?;
+            p.save(&path)?;
+            println!("imported {} ({})", p.name, fingerprint(&p.pubkey()?));
+        }
+    }
+    Ok(())
 }
 
 fn serve(listen: String, data: PathBuf, token: Option<String>, name: String) -> Result<()> {
@@ -82,15 +221,25 @@ fn serve(listen: String, data: PathBuf, token: Option<String>, name: String) -> 
             move || servers::Manager::new(store)
         })
         .await??;
+        let identity = members::Identity::open(&data, &name)?;
+        eprintln!(
+            "cell-hub: identity {} ({})",
+            cell_identity::fingerprint(&identity.hub_pubkey),
+            identity.hub_pubkey
+        );
+        if let Some(inv) = identity.ensure_first_admin_invite()? {
+            eprintln!("cell-hub: no admin yet. Pair your profile with this invite code: {}", inv.code);
+        }
+        if token.is_some() {
+            eprintln!("cell-hub: legacy admin token is set; sessions from paired profiles are the normal way in");
+        }
         let app = Arc::new(api::App {
             store,
             servers,
             token: token.clone(),
             name,
+            identity,
         });
-        if token.is_none() {
-            eprintln!("cell-hub: no admin token set; every call is allowed (set --token or CELL_HUB_TOKEN)");
-        }
         let listener = tokio::net::TcpListener::bind(&listen).await?;
         eprintln!("cell-hub: listening on http://{listen}  data: {}", data.display());
         axum::serve(listener, api::router(app)).await?;

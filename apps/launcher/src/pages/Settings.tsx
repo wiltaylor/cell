@@ -27,7 +27,7 @@ export function SettingsPage() {
         <label class="field">Hub URL
           <input class="input" value={url()} onInput={(e) => setUrl(e.currentTarget.value)} placeholder="http://hub.example:8787" />
         </label>
-        <label class="field">Hub admin token (for uploads)
+        <label class="field">Legacy hub token (only for hubs started with --token)
           <input class="input" type="password" value={token()} onInput={(e) => setToken(e.currentTarget.value)} />
         </label>
         <div class="btn-row"><Button variant="accent" onClick={save}>Save</Button></div>

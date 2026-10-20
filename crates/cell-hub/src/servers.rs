@@ -24,6 +24,9 @@ pub struct InstanceRecord {
     pub game_id: String,
     pub name: String,
     pub created_at: u64,
+    /// Arguments a client passes to the game to join, e.g. `["-n", "host:3979"]`.
+    #[serde(default)]
+    pub join_args: Vec<String>,
 }
 
 pub struct Running {
@@ -151,7 +154,12 @@ impl Manager {
         Ok(())
     }
 
-    pub async fn create(&self, game_id: &str, name: &str) -> Result<ServerInstance> {
+    pub async fn create(
+        &self,
+        game_id: &str,
+        name: &str,
+        join_args: Vec<String>,
+    ) -> Result<ServerInstance> {
         let game = self.store.load(game_id)?;
         let id = id_for(name);
         let dir = self.instance_dir(&id);
@@ -161,6 +169,7 @@ impl Manager {
             game_id: game.id.clone(),
             name: name.to_string(),
             created_at: now(),
+            join_args,
         };
         std::fs::write(dir.join("instance.json"), serde_json::to_vec_pretty(&rec)?)?;
         let inst = Arc::new(Mutex::new(Instance {
@@ -202,7 +211,37 @@ impl Manager {
             } else {
                 "entry".into()
             },
+            join_args: inst.record.join_args.clone(),
         }
+    }
+
+    pub async fn update(
+        &self,
+        id: &str,
+        name: Option<String>,
+        join_args: Option<Vec<String>>,
+    ) -> Result<ServerInstance> {
+        let inst = self.find(id).await?;
+        let mut guard = inst.lock().await;
+        if let Some(n) = name {
+            if !n.trim().is_empty() {
+                guard.record.name = n;
+            }
+        }
+        if let Some(j) = join_args {
+            guard.record.join_args = j;
+        }
+        std::fs::write(
+            self.instance_dir(id).join("instance.json"),
+            serde_json::to_vec_pretty(&guard.record)?,
+        )?;
+        Ok(self.summary(&guard).await)
+    }
+
+    pub async fn record(&self, id: &str) -> Result<InstanceRecord> {
+        let inst = self.find(id).await?;
+        let guard = inst.lock().await;
+        Ok(guard.record.clone())
     }
 
     pub async fn get(&self, id: &str) -> Result<ServerInstance> {
