@@ -73,10 +73,27 @@ launcher-app-build:
 	pnpm --dir apps/launcher build
 	cargo build --release -p cell-launcher-app
 
-# Run the desktop launcher
+# Run the desktop launcher (builds it first only when the binary is missing)
+[group('launcher')]
+launcher:
+	@test -x target/release/cell-launcher-app || just launcher-app-build
+	./target/release/cell-launcher-app
+
+# Rebuild the desktop launcher and run it
 [group('launcher')]
 launcher-app-run: launcher-app-build
 	./target/release/cell-launcher-app
+
+# Install the launcher for this user: ~/.local/bin and an app-menu entry
+[group('launcher')]
+launcher-install:
+	@test -x target/release/cell-launcher-app || just launcher-app-build
+	mkdir -p ~/.local/bin ~/.local/share/applications ~/.local/share/icons/hicolor/128x128/apps
+	cp target/release/cell-launcher-app ~/.local/bin/cell-launcher-app
+	cp apps/launcher/src-tauri/icons/128x128.png ~/.local/share/icons/hicolor/128x128/apps/cell-launcher.png
+	printf '[Desktop Entry]\nType=Application\nName=Cell Launcher\nComment=Your library of portable games\nExec=%s/.local/bin/cell-launcher-app\nIcon=cell-launcher\nTerminal=false\nCategories=Game;\n' "$HOME" > ~/.local/share/applications/cell-launcher.desktop
+	-update-desktop-database ~/.local/share/applications 2>/dev/null
+	@echo "installed: run 'cell-launcher-app' or find Cell Launcher in the app menu"
 
 # Run the launcher with hot reload (Vite + Tauri dev)
 [group('launcher')]
