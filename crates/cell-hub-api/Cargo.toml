@@ -1,9 +1,0 @@
-[package]
-name = "cell-hub-api"
-version.workspace = true
-edition.workspace = true
-license.workspace = true
-description = "Types shared by Cell Hub, its console and the Cell launcher."
-
-[dependencies]
-serde.workspace = true

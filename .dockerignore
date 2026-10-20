@@ -1,9 +1,0 @@
-target
-node_modules
-apps/*/node_modules
-apps/*/dist
-examples/dist
-examples/*/*.cell
-examples/wine-doom/dist
-hub-data
-.git

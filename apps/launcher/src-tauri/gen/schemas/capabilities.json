@@ -1,1 +1,0 @@
-{"default":{"identifier":"default","description":"The launcher window may call its own commands and the dialog plugin.","local":true,"windows":["main"],"permissions":["core:default","dialog:default"]}}

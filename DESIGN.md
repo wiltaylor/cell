@@ -623,6 +623,8 @@ sections above:
   desktop action per named command. `steam-add` edits Steam's binary
   `shortcuts.vdf` and writes the grid art under the crc32-derived app id.
   The art is PNG bytes in the manifest, declared in the build file.
+- **Hub, launcher app and identity moved to wiltaylor/cell-hub** on
+  2026-10-20. The notes below describe them as first built here.
 - **Identity is a keypair, not an account.** Launcher, CLI, web UI and
   hub each hold an Ed25519 profile. Pairing signs `cell-pair:v1:<hub
   key>:<code>`; sign-in signs `cell-login:v1:<hub key>:<nonce>` and gets a

@@ -29,6 +29,7 @@ them behind one declarative build file written in
 - [Grants](#grants)
 - [GPU: OpenGL and Vulkan](#gpu-opengl-and-vulkan)
 - [Layers and sharing](#layers-and-sharing)
+- [Cell Hub and Cell Launcher](#cell-hub-and-cell-launcher)
 - [Running a cell](#running-a-cell)
 - [State, saves and overrides](#state-saves-and-overrides)
 - [Building from source](#building-from-source)
@@ -374,99 +375,16 @@ library and in gaming mode like any other game. `CELL_STEAM_DIR` and
 `CELL_STEAM_USER` pick a Steam installation and account when there are
 several.
 
-## Cell Launcher and Cell Hub
+## Cell Hub and Cell Launcher
 
-Two more programs live in this repository and share the launcher's file
-format and look.
-
-**Cell Launcher** (`apps/launcher`, Tauri 2 with a SolidJS front end and a
-Rust backend) is a desktop library for cells. It scans a games folder,
-shows each cell with its artwork and grants, starts games and their named
-commands, registers them with the desktop or Steam, and browses a hub:
-install games with progress, upload local cells, see and join the hub's
-game servers, pair with peers, and accept their invites. Build and run it with `just launcher-app-run`. Settings (games
-folder, hub URL, token) live in the app config directory.
-
-**Cell Hub** (`crates/cell-hub`, axum) is the server side:
-
-- a catalog of cells with their art and referenced layers, uploaded through
-  the web UI, the launcher, or `cell-hub upload file.cell`;
-- game servers: any cell with a `command "server"` block can be hosted. Each
-  instance gets its own state directory, a live console (stdin and stdout
-  over a WebSocket), a config-file editor rooted at the game's home, and
-  tar.gz backups with restore;
-- a web admin UI embedded in the binary, in the same style as the launcher;
-- `cell-hub console` for a terminal console: servers on the left, the live
-  log on the right, a command line at the bottom, function keys for start,
-  stop, restart and backup.
-
-```sh
-just hub-serve                            # http://localhost:8787, token "devtoken"
-cell-hub upload examples/dist/openttd.cell
-cell-hub console                          # terminal console
-```
-
-### Running the hub in Docker
-
-```sh
-docker compose -f docker/compose.yaml up -d
-docker compose -f docker/compose.yaml logs hub      # the first admin invite code
-```
-
-`docker/Dockerfile.hub` builds the web UI and the hub into a 90 MB Debian
-image that runs as an unprivileged user with `/data` as its volume;
-releases push it to `ghcr.io/wiltaylor/cell-hub`. Game servers inside the
-container are cells, so the compose file gives the service `/dev/fuse` and
-lifts Docker's seccomp, AppArmor and masked-`/proc` profiles with
-`security_opt`; it is not `privileged`. Publish each game server's port
-beside `8787`, as the file does for OpenTTD's 3979. Verified with an
-OpenTTD dedicated server started, backed up, restored and driven through
-the console inside the container.
-
-### Profiles instead of accounts
-
-There are no user accounts. A **profile** is an Ed25519 keypair with a
-display name, kept on your machine (`~/.config/cell/profile.json` for the
-launcher and the CLI, the browser's local storage for the web UI). The
-public key is your identity on every hub and with every peer. Nothing to
-sign up for and no password to type: the only passphrase is on the export
-file, `name.cellprofile`, which moves a profile to another machine or
-browser. Lose the file and the passphrase and you pair again; there is no
-authority to run a reset.
-
-A hub has a profile too and shows its fingerprint. Pairing is a code
-exchange:
-
-```sh
-cell-hub serve --data ./hub-data        # prints "no admin yet ... invite code: K7F3-9Q2M"
-cell-hub profile init --name Wil
-cell-hub pair --url http://hub:8787 K7F3-9Q2M     # first pairing becomes the admin
-cell-hub invite --role member            # more codes: admin, operator (named servers), member
-cell-hub console                         # signs in with the profile
-```
-
-The client signs the code and the hub's public key; the hub stores the
-member with the invite's role. Later calls sign a challenge and get a
-session token. Roles: `admin` manages the catalog, members and servers;
-`operator` controls the servers named on its invite; `member` downloads,
-sees servers, and pairs with peers. A legacy `--token` still works as an
-admin bearer for scripts.
-
-**Peers.** Two members pair by exchanging a short code through the hub:
-one makes it on the Peers page, the other enters it. Paired peers see each
-other's presence (online, in a game) and can send invites to a hosted
-server. An invite carries the server's join arguments, so the launcher's
-Join button starts the game straight into it. There is no file transfer
-between peers in this cut.
-
-The API is plain JSON under `/api`; `crates/cell-hub-api` holds the types
-and `crates/cell-identity` the keys, codes and export format.
-
-A game server is a normal cell. `examples/openttd` declares the client as
-the entry point and `command "server" { exec = ["openttd", "-D"] }` for the
-dedicated server; the hub runs that command headless with the host network,
-so the server listens on its usual port, and the OpenTTD console works
-through the hub's console.
+The server side and the desktop library live in their own repository,
+[wiltaylor/cell-hub](https://github.com/wiltaylor/cell-hub): Cell Hub
+hosts cells for download, runs game servers from cells with a console,
+config editor and backups, and pairs people by keypair profiles instead of
+accounts; Cell Launcher is the Steam-style desktop library that plays
+cells and talks to a hub. Both depend on this repository's `cell-core`
+crate for the file format. This repository is the format itself: the
+launcher, the build tool, the schema and the examples.
 
 ## State, saves and overrides
 
@@ -490,8 +408,6 @@ Requirements on the build machine:
 
 - A Rust toolchain with the `x86_64-unknown-linux-musl` target
   (`rustup target add x86_64-unknown-linux-musl`).
-- Node 20+ and pnpm for the two web front ends; webkit2gtk 4.1 and GTK 3
-  development packages for the Tauri launcher.
 - `zig`, used as the musl C compiler for the zstd and ring sources through
   `tools/musl-cc`.
 - `squashfs-tools` (`mksquashfs`) for the build tool.
@@ -514,10 +430,6 @@ The workspace has three crates:
 | `cell-core` | The file format and manifest, a random-access squashfs reader, the FUSE server, the sandbox (namespaces, mounts, grants, `pivot_root`, `exec`), host probing, NVIDIA driver fetching |
 | `cell-launcher` | The static musl binary that heads every `.cell`: 3 MiB, no dynamic dependencies |
 | `cell` | The build tool: reads `cell.wcl` through the WCL crate, pulls OCI images, runs builds in a user namespace, packs and assembles |
-| `cell-hub` | The hub server, its web UI (embedded from `apps/hub-web`) and the terminal console |
-| `cell-hub-api` | JSON types shared by the hub, the console and the launcher |
-| `cell-identity` | Profiles: Ed25519 keys, invite codes, signed challenges, passphrase-protected export; the blocking client for pairing and sign-in |
-| `apps/launcher/src-tauri` | The desktop launcher's Rust backend |
 
 The WCL dependency is pinned to a git revision of
 [wiltaylor/wcl](https://github.com/wiltaylor/wcl).
@@ -538,7 +450,7 @@ Wayland, Intel Iris Xe plus an NVIDIA RTX 4060 on driver 615.71.09:
 | `gl-tools` | 3 MiB + the same runtime | glxinfo, vulkaninfo, vkcube, eglinfo on the shared runtime file |
 | `wine-doom` | 767 MiB | Wine prefix created on first run; Minesweeper and Chocolate Doom (Freedoom) run through Wine with wined3d and DirectSound audio |
 | `cell-builder` | 12 MiB | The build tool itself; built `gl-tools` and a fresh Arch runtime with pacman from inside its own sandbox |
-| `openttd` | 4 MiB + 258 MiB runtime | OpenTTD client as the entry point; its dedicated server hosted by Cell Hub with console, config files and backups |
+| `openttd` | 4 MiB + 258 MiB runtime | OpenTTD client as the entry point and `command "server"` for the dedicated server, which Cell Hub can host |
 
 ## How it works
 
