@@ -1,0 +1,41 @@
+# Cell Hub with Docker Compose.
+#
+#   docker compose -f docker/compose.yaml up -d
+#   docker compose -f docker/compose.yaml logs hub     # the first admin invite code is here
+#
+# Game servers run as cells inside this container. A cell makes its own
+# user namespace, mounts its layers over FUSE and pivots into an overlay,
+# which Docker's default seccomp and AppArmor profiles forbid. The two
+# security_opt lines lift those profiles for this one service; the
+# container still runs as an unprivileged user and is not privileged.
+services:
+  hub:
+    image: ghcr.io/wiltaylor/cell-hub:latest
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.hub
+    container_name: cell-hub
+    restart: unless-stopped
+    environment:
+      CELL_HUB_NAME: "My Cell Hub"
+      # Optional legacy admin token for scripts. Profiles are the normal way in.
+      # CELL_HUB_TOKEN: change-me
+    ports:
+      - "8787:8787"          # web UI and API
+      - "3979:3979/tcp"      # example: OpenTTD dedicated server
+      - "3979:3979/udp"
+    volumes:
+      - hub-data:/data
+    devices:
+      - /dev/fuse:/dev/fuse
+    security_opt:
+      - seccomp=unconfined
+      - apparmor=unconfined
+      # Docker masks parts of /proc; a cell then cannot mount a fresh /proc
+      # for its pid namespace. This keeps /proc unmasked.
+      - systempaths=unconfined
+    # If the host still refuses user namespaces, see "Host requirements" in README.md:
+    # kernel.unprivileged_userns_clone=1 and user.max_user_namespaces>0 on the host.
+
+volumes:
+  hub-data:

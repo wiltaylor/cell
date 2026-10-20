@@ -1,0 +1,44 @@
+# Cell Hub: the catalog, game-server host, web UI and console in one image.
+#
+# Build from the repository root:
+#   docker build -f docker/Dockerfile.hub -t cell-hub .
+
+# ---- web UI --------------------------------------------------------------------
+FROM node:22-bookworm-slim AS web
+RUN corepack enable && corepack prepare pnpm@10 --activate
+WORKDIR /src
+COPY pnpm-workspace.yaml pnpm-lock.yaml ./
+COPY apps/ui/package.json apps/ui/package.json
+COPY apps/hub-web/package.json apps/hub-web/package.json
+COPY apps/launcher/package.json apps/launcher/package.json
+RUN pnpm install --frozen-lockfile --filter cell-hub-web... 
+COPY apps/ui apps/ui
+COPY apps/hub-web apps/hub-web
+RUN pnpm --dir apps/hub-web build
+
+# ---- hub binary ----------------------------------------------------------------
+FROM rust:1-bookworm AS build
+WORKDIR /src
+COPY Cargo.toml Cargo.lock ./
+COPY crates crates
+COPY apps/launcher/src-tauri/Cargo.toml apps/launcher/src-tauri/Cargo.toml
+COPY schema schema
+COPY --from=web /src/apps/hub-web/dist apps/hub-web/dist
+# The launcher crate is a workspace member; cargo needs its manifest and a
+# source file to resolve the workspace, not to build it.
+RUN mkdir -p apps/launcher/src-tauri/src && echo 'fn main() {}' > apps/launcher/src-tauri/src/main.rs && echo '' > apps/launcher/src-tauri/src/lib.rs && echo 'fn main() {}' > apps/launcher/src-tauri/build.rs
+RUN cargo build --release -p cell-hub
+
+# ---- runtime -------------------------------------------------------------------
+FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/* \
+ && useradd --uid 1000 --create-home --shell /bin/sh hub \
+ && mkdir -p /data /tmp/run && chown hub:hub /data /tmp/run
+COPY --from=build /src/target/release/cell-hub /usr/local/bin/cell-hub
+USER hub
+# The launcher inside game-server cells puts its mounts under XDG_RUNTIME_DIR.
+ENV XDG_RUNTIME_DIR=/tmp/run HOME=/home/hub CELL_HUB_DATA=/data CELL_HUB_LISTEN=0.0.0.0:8787
+VOLUME ["/data"]
+EXPOSE 8787
+ENTRYPOINT ["cell-hub"]
+CMD ["serve"]

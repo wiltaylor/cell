@@ -18,6 +18,64 @@ use crate::store::{now, Store};
 
 const LOG_CAP: usize = 3000;
 
+/// Archive a state directory, skipping the overlay's scratch `work`
+/// directories (the kernel owns them, mode 000) and instance locks.
+fn append_state<W: std::io::Write>(
+    tar: &mut tar::Builder<W>,
+    dir: &Path,
+    rel: &Path,
+) -> Result<()> {
+    tar.append_dir(rel, dir)?;
+    for e in std::fs::read_dir(dir)? {
+        let e = e?;
+        let name = e.file_name();
+        let name_s = name.to_string_lossy().to_string();
+        let path = e.path();
+        let rel_child = rel.join(&name);
+        let md = std::fs::symlink_metadata(&path)?;
+        if md.is_dir() {
+            let parent_is_apps = dir
+                .parent()
+                .and_then(|p| p.file_name())
+                .map(|n| n == "apps")
+                .unwrap_or(false);
+            if parent_is_apps && name_s == "work" {
+                continue;
+            }
+            append_state(tar, &path, &rel_child)?;
+        } else if name_s == "instance.lock" {
+            continue;
+        } else if md.file_type().is_symlink() {
+            tar.append_path_with_name(&path, &rel_child)?;
+        } else {
+            let mut f = std::fs::File::open(&path)?;
+            tar.append_file(&rel_child, &mut f)?;
+        }
+    }
+    Ok(())
+}
+
+/// Delete a state directory. The overlay's `work` directories are mode
+/// 000, so every directory is made writable first.
+fn remove_state(dir: &Path) -> Result<()> {
+    if !dir.exists() {
+        return Ok(());
+    }
+    fn open_up(p: &Path) {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(p, std::fs::Permissions::from_mode(0o700));
+        if let Ok(rd) = std::fs::read_dir(p) {
+            for e in rd.flatten() {
+                if e.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                    open_up(&e.path());
+                }
+            }
+        }
+    }
+    open_up(dir);
+    std::fs::remove_dir_all(dir).with_context(|| format!("remove {}", dir.display()))
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InstanceRecord {
     pub id: String,
@@ -289,6 +347,8 @@ impl Manager {
         cmd.current_dir(&dir)
             .env("XDG_DATA_HOME", &xdg)
             .env("CELL_NO_GAMESCOPE", "1")
+            // A dedicated server draws nothing; never fetch GPU drivers for it.
+            .env("CELL_NVIDIA", "off")
             .env(
                 "CELL_LAYER_PATH",
                 self.store.root.join("layers").to_string_lossy().to_string(),
@@ -398,9 +458,7 @@ impl Manager {
         self.stop(id).await?;
         self.inner.lock().await.remove(id);
         let dir = self.instance_dir(id);
-        if dir.exists() {
-            std::fs::remove_dir_all(dir)?;
-        }
+        remove_state(&dir)?;
         Ok(())
     }
 
@@ -508,8 +566,7 @@ impl Manager {
             let enc = flate2::write::GzEncoder::new(f, flate2::Compression::fast());
             let mut tar = tar::Builder::new(enc);
             tar.follow_symlinks(false);
-            tar.append_dir_all("xdg", &xdg)
-                .context("archive the state")?;
+            append_state(&mut tar, &xdg, Path::new("xdg")).context("archive the state")?;
             tar.into_inner()?.finish()?;
         }
         let size = std::fs::metadata(&path)?.len();
@@ -538,9 +595,7 @@ impl Manager {
         self.stop(id).await?;
         let inst = self.find(id).await?;
         let xdg = self.instance_dir(id).join("xdg");
-        if xdg.exists() {
-            std::fs::remove_dir_all(&xdg)?;
-        }
+        remove_state(&xdg)?;
         let f = std::fs::File::open(&path)?;
         let dec = flate2::read::GzDecoder::new(f);
         let mut ar = tar::Archive::new(dec);

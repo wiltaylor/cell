@@ -575,15 +575,19 @@ fn child(spec: &Spec, root: &Path) -> Result<i32> {
     let proc_dir = root.join("proc");
     if spec.host_proc {
         bind(Path::new("/proc"), &proc_dir, BindMode::Rw)?;
-    } else {
-        mount(
-            "proc",
-            &proc_dir,
-            Some("proc"),
-            libc::MS_NOSUID | libc::MS_NODEV | libc::MS_NOEXEC,
-            None,
-        )
-        .context("mount /proc")?;
+    } else if let Err(e) = mount(
+        "proc",
+        &proc_dir,
+        Some("proc"),
+        libc::MS_NOSUID | libc::MS_NODEV | libc::MS_NOEXEC,
+        None,
+    ) {
+        // A container that masks parts of /proc makes a fresh procfs mount
+        // impossible from a user namespace ("not fully visible"). Bind the
+        // existing one instead: the pid namespace is still private, only
+        // /proc shows the outer view.
+        eprintln!("cell: warning: {e}; binding the existing /proc instead");
+        bind(Path::new("/proc"), &proc_dir, BindMode::Rw).context("bind /proc")?;
     }
     chdir(root)?;
     pivot_root(Path::new("."), Path::new("."))?;

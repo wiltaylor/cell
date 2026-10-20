@@ -406,6 +406,23 @@ cell-hub upload examples/dist/openttd.cell
 cell-hub console                          # terminal console
 ```
 
+### Running the hub in Docker
+
+```sh
+docker compose -f docker/compose.yaml up -d
+docker compose -f docker/compose.yaml logs hub      # the first admin invite code
+```
+
+`docker/Dockerfile.hub` builds the web UI and the hub into a 90 MB Debian
+image that runs as an unprivileged user with `/data` as its volume;
+releases push it to `ghcr.io/wiltaylor/cell-hub`. Game servers inside the
+container are cells, so the compose file gives the service `/dev/fuse` and
+lifts Docker's seccomp, AppArmor and masked-`/proc` profiles with
+`security_opt`; it is not `privileged`. Publish each game server's port
+beside `8787`, as the file does for OpenTTD's 3979. Verified with an
+OpenTTD dedicated server started, backed up, restored and driven through
+the console inside the container.
+
 ### Profiles instead of accounts
 
 There are no user accounts. A **profile** is an Ed25519 keypair with a
