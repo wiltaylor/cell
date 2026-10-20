@@ -13,7 +13,12 @@ fn pipe() -> Result<(std::fs::File, std::fs::File)> {
     if unsafe { libc::pipe(fds.as_mut_ptr()) } != 0 {
         bail!("pipe: {}", std::io::Error::last_os_error());
     }
-    Ok(unsafe { (std::fs::File::from_raw_fd(fds[0]), std::fs::File::from_raw_fd(fds[1])) })
+    Ok(unsafe {
+        (
+            std::fs::File::from_raw_fd(fds[0]),
+            std::fs::File::from_raw_fd(fds[1]),
+        )
+    })
 }
 
 fn sub_range(file: &str, user: &str, uid: u32) -> Result<(u32, u32)> {
@@ -122,7 +127,9 @@ pub fn with_mapped_root<F: FnOnce() -> Result<i32>>(f: F) -> Result<i32> {
     drop(ready_w);
     drop(go_r);
     let mut b = [0u8; 1];
-    ready_r.read_exact(&mut b).context("build child did not start")?;
+    ready_r
+        .read_exact(&mut b)
+        .context("build child did not start")?;
     if let Mapping::Subordinate {
         uid,
         gid,

@@ -57,7 +57,9 @@ pub fn unpack_tar(reader: impl Read, dest: &Path, opts: &Options) -> Result<()> 
     for e in ar.entries()? {
         let mut e = e?;
         let raw = e.path()?.into_owned();
-        let Some(rel) = clean_path(&raw, opts.strip_root_dir) else { continue };
+        let Some(rel) = clean_path(&raw, opts.strip_root_dir) else {
+            continue;
+        };
         if rel.as_os_str().is_empty() {
             continue;
         }
@@ -92,7 +94,9 @@ pub fn unpack_tar(reader: impl Read, dest: &Path, opts: &Options) -> Result<()> 
                 // tar-rs resolves hard links against the working directory;
                 // resolve them inside the destination instead.
                 let Some(link) = e.link_name()? else { continue };
-                let Some(link_rel) = clean_path(&link, opts.strip_root_dir) else { continue };
+                let Some(link_rel) = clean_path(&link, opts.strip_root_dir) else {
+                    continue;
+                };
                 let src = resolve(dest, &link_rel);
                 remove_any(&target);
                 if let Err(err) = fs::hard_link(&src, &target) {
@@ -123,9 +127,7 @@ fn clean_path(raw: &Path, strip_root_dir: bool) -> Option<PathBuf> {
     for c in raw.components() {
         match c {
             Component::Normal(x) => {
-                let skip = first
-                    && strip_root_dir
-                    && x.to_string_lossy().starts_with("root.");
+                let skip = first && strip_root_dir && x.to_string_lossy().starts_with("root.");
                 first = false;
                 if !skip {
                     out.push(x);
@@ -170,7 +172,9 @@ fn follow(root: &Path, p: PathBuf, depth: u32) -> PathBuf {
     let mut cur = if t.is_absolute() {
         root.to_path_buf()
     } else {
-        p.parent().map(Path::to_path_buf).unwrap_or_else(|| root.to_path_buf())
+        p.parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| root.to_path_buf())
     };
     for c in t.components() {
         match c {
@@ -244,7 +248,11 @@ mod tests {
         for (path, kind, data) in entries {
             let mut h = tar::Header::new_gnu();
             h.set_entry_type(*kind);
-            h.set_mode(if *kind == EntryType::Directory { 0o755 } else { 0o644 });
+            h.set_mode(if *kind == EntryType::Directory {
+                0o755
+            } else {
+                0o644
+            });
             match kind {
                 EntryType::Symlink => {
                     h.set_size(0);
@@ -264,7 +272,10 @@ mod tests {
         let dest = std::env::temp_dir().join(format!("cell-unpack-test-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dest);
         fs::create_dir_all(&dest).unwrap();
-        let opts = Options { strip_root_dir: false, whiteouts: true };
+        let opts = Options {
+            strip_root_dir: false,
+            whiteouts: true,
+        };
         let d = EntryType::Directory;
         let f = EntryType::Regular;
         let l1 = layer(&[
@@ -305,9 +316,15 @@ mod tests {
         std::os::unix::fs::symlink("/usr/bin", dest.join("bin")).unwrap();
         std::os::unix::fs::symlink("../../..", dest.join("usr/up")).unwrap();
         assert_eq!(resolve(&dest, Path::new("bin/sh")), dest.join("usr/bin/sh"));
-        assert_eq!(resolve(&dest, Path::new("usr/up/etc/x")), dest.join("etc/x"));
+        assert_eq!(
+            resolve(&dest, Path::new("usr/up/etc/x")),
+            dest.join("etc/x")
+        );
         assert_eq!(clean_path(Path::new("../x"), false), None);
-        assert_eq!(clean_path(Path::new("./root.x86_64/etc"), true), Some(PathBuf::from("etc")));
+        assert_eq!(
+            clean_path(Path::new("./root.x86_64/etc"), true),
+            Some(PathBuf::from("etc"))
+        );
         let _ = fs::remove_dir_all(&dest);
     }
 }

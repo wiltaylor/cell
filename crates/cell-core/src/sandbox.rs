@@ -19,7 +19,11 @@ use crate::format::BindMode;
 
 pub enum LayerSource {
     /// A squashfs image at `base` inside `file`.
-    Squashfs { file: fs::File, base: u64, name: String },
+    Squashfs {
+        file: fs::File,
+        base: u64,
+        name: String,
+    },
     /// A plain directory, bound read-only.
     Dir(PathBuf),
 }
@@ -100,7 +104,8 @@ pub fn mount(
             t.as_ptr(),
             f.as_ref().map_or(std::ptr::null(), |x| x.as_ptr()),
             flags,
-            d.as_ref().map_or(std::ptr::null(), |x| x.as_ptr() as *const libc::c_void),
+            d.as_ref()
+                .map_or(std::ptr::null(), |x| x.as_ptr() as *const libc::c_void),
         )
     };
     if r != 0 {
@@ -273,7 +278,11 @@ fn chdir(p: &Path) -> Result<()> {
 fn umount_detach(p: &Path) -> Result<()> {
     let c = cstr(p);
     if unsafe { libc::umount2(c.as_ptr(), libc::MNT_DETACH) } != 0 {
-        bail!("umount {}: {}", p.display(), std::io::Error::last_os_error());
+        bail!(
+            "umount {}: {}",
+            p.display(),
+            std::io::Error::last_os_error()
+        );
     }
     Ok(())
 }
@@ -304,8 +313,14 @@ extern "C" fn forward(sig: libc::c_int) {
 /// namespace.
 pub fn run(spec: &Spec, work: &Path) -> Result<i32> {
     // Nothing we mount may leak to the host.
-    mount("none", Path::new("/"), None, libc::MS_REC | libc::MS_PRIVATE, None)
-        .context("make / private")?;
+    mount(
+        "none",
+        Path::new("/"),
+        None,
+        libc::MS_REC | libc::MS_PRIVATE,
+        None,
+    )
+    .context("make / private")?;
     mkdir_p(work)?;
     mount("tmpfs", work, Some("tmpfs"), 0, Some("mode=0755")).context("work tmpfs")?;
 
@@ -365,7 +380,13 @@ pub fn run(spec: &Spec, work: &Path) -> Result<i32> {
     for d in ["dev", "tmp", "run"] {
         let p = root.join(d);
         mkdir_p(&p)?;
-        mount("tmpfs", &p, Some("tmpfs"), libc::MS_NOSUID, Some("mode=0755"))?;
+        mount(
+            "tmpfs",
+            &p,
+            Some("tmpfs"),
+            libc::MS_NOSUID,
+            Some("mode=0755"),
+        )?;
     }
     fs::set_permissions(root.join("tmp"), fs::Permissions::from_mode(0o1777))?;
     let sys = root.join("sys");
@@ -397,7 +418,13 @@ pub fn run(spec: &Spec, work: &Path) -> Result<i32> {
     }
     let shm = root.join("dev/shm");
     mkdir_p(&shm)?;
-    mount("tmpfs", &shm, Some("tmpfs"), libc::MS_NOSUID | libc::MS_NODEV, Some("mode=1777"))?;
+    mount(
+        "tmpfs",
+        &shm,
+        Some("tmpfs"),
+        libc::MS_NOSUID | libc::MS_NODEV,
+        Some("mode=1777"),
+    )?;
     let _ = std::os::unix::fs::symlink("/proc/self/fd", root.join("dev/fd"));
     let _ = std::os::unix::fs::symlink("/proc/self/fd/0", root.join("dev/stdin"));
     let _ = std::os::unix::fs::symlink("/proc/self/fd/1", root.join("dev/stdout"));
@@ -413,7 +440,13 @@ pub fn run(spec: &Spec, work: &Path) -> Result<i32> {
     for t in &spec.tmpfs {
         let p = guest(&root, t);
         mkdir_p(&p)?;
-        mount("tmpfs", &p, Some("tmpfs"), libc::MS_NOSUID, Some("mode=0755"))?;
+        mount(
+            "tmpfs",
+            &p,
+            Some("tmpfs"),
+            libc::MS_NOSUID,
+            Some("mode=0755"),
+        )?;
     }
     for b in &spec.binds {
         if !b.host.exists() {
@@ -470,7 +503,8 @@ pub fn run(spec: &Spec, work: &Path) -> Result<i32> {
     if spec.new_pid && !spec.host_proc {
         clone_flags |= libc::CLONE_NEWPID as libc::c_long;
     }
-    let pid = unsafe { libc::syscall(libc::SYS_clone, clone_flags, 0usize, 0usize, 0usize, 0usize) } as libc::pid_t;
+    let pid = unsafe { libc::syscall(libc::SYS_clone, clone_flags, 0usize, 0usize, 0usize, 0usize) }
+        as libc::pid_t;
     if pid < 0 {
         bail!("clone: {}", std::io::Error::last_os_error());
     }
@@ -521,14 +555,23 @@ fn exit_code(status: libc::c_int) -> i32 {
 
 fn is_on_tmpfs_we_own(parent: &Path, root: &Path) -> bool {
     let rel = parent.strip_prefix(root).unwrap_or(parent);
-    let first = rel.components().next().map(|c| c.as_os_str().to_string_lossy().to_string());
+    let first = rel
+        .components()
+        .next()
+        .map(|c| c.as_os_str().to_string_lossy().to_string());
     matches!(first.as_deref(), Some("dev") | Some("tmp") | Some("run"))
 }
 
 /// Pid 1 of the sandbox. Returns the exit code of the entry point.
 fn child(spec: &Spec, root: &Path) -> Result<i32> {
     unshare(libc::CLONE_NEWNS).context("child mount namespace")?;
-    mount("none", Path::new("/"), None, libc::MS_REC | libc::MS_PRIVATE, None)?;
+    mount(
+        "none",
+        Path::new("/"),
+        None,
+        libc::MS_REC | libc::MS_PRIVATE,
+        None,
+    )?;
     let proc_dir = root.join("proc");
     if spec.host_proc {
         bind(Path::new("/proc"), &proc_dir, BindMode::Rw)?;
@@ -591,7 +634,11 @@ fn child(spec: &Spec, root: &Path) -> Result<i32> {
     if spec.exec.is_empty() {
         bail!("nothing to run");
     }
-    let argv: Vec<CString> = spec.exec.iter().map(|a| CString::new(a.as_str()).unwrap()).collect();
+    let argv: Vec<CString> = spec
+        .exec
+        .iter()
+        .map(|a| CString::new(a.as_str()).unwrap())
+        .collect();
     init(&argv, &env)
 }
 
@@ -659,11 +706,18 @@ fn exec(argv: &[CString], env: &[CString]) -> Result<()> {
     };
     let r = cstr(&resolved);
     unsafe { libc::execve(r.as_ptr(), argp.as_ptr(), envp.as_ptr()) };
-    bail!("exec {}: {}", resolved.display(), std::io::Error::last_os_error());
+    bail!(
+        "exec {}: {}",
+        resolved.display(),
+        std::io::Error::last_os_error()
+    );
 }
 
 fn run_wait(cmd: &[String], env: &[CString]) -> Result<()> {
-    let argv: Vec<CString> = cmd.iter().map(|a| CString::new(a.as_str()).unwrap()).collect();
+    let argv: Vec<CString> = cmd
+        .iter()
+        .map(|a| CString::new(a.as_str()).unwrap())
+        .collect();
     let pid = unsafe { libc::fork() };
     if pid < 0 {
         bail!("fork: {}", std::io::Error::last_os_error());

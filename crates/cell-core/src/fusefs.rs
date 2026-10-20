@@ -12,8 +12,8 @@ use std::time::{Duration, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
 use fuser::{
-    FileAttr, FileType, Filesystem, MountOption, ReplyAttr, ReplyData, ReplyDirectory,
-    ReplyEntry, ReplyOpen, Request, FUSE_ROOT_ID,
+    FileAttr, FileType, Filesystem, MountOption, ReplyAttr, ReplyData, ReplyDirectory, ReplyEntry,
+    ReplyOpen, Request, FUSE_ROOT_ID,
 };
 
 use crate::squashfs::{DirEntry, Inode, InodeKind, InodeRef, Squashfs};
@@ -216,7 +216,12 @@ impl Filesystem for LayerFs {
                 n => {
                     let Some(e) = list.get(n - 2) else { break };
                     let child = self.swap(e.inode_number as u64);
-                    reply.add(child, (n + 1) as i64, ftype(e.kind), OsStr::from_bytes(&e.name))
+                    reply.add(
+                        child,
+                        (n + 1) as i64,
+                        ftype(e.kind),
+                        OsStr::from_bytes(&e.name),
+                    )
                 }
             };
             if full {

@@ -72,9 +72,13 @@ pub struct Plan {
 }
 
 pub fn open(path: &Path) -> Result<Document> {
-    let source = std::fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
+    let source =
+        std::fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
     if !source.contains("import <cell.wcl>") {
-        bail!("missing schema import: add `import <cell.wcl>` at the top of {}", path.display());
+        bail!(
+            "missing schema import: add `import <cell.wcl>` at the top of {}",
+            path.display()
+        );
     }
     let mut registry = Registry::new();
     registry.register("cell.wcl", SCHEMA);
@@ -182,7 +186,10 @@ pub fn plan(doc: &Document, root: &Path) -> Result<Plan> {
         }
     }
     if apps.len() != 1 {
-        bail!("a build file declares exactly one `app` block, found {}", apps.len());
+        bail!(
+            "a build file declares exactly one `app` block, found {}",
+            apps.len()
+        );
     }
     let app = &apps[0];
     let mut plan = Plan {
@@ -310,7 +317,11 @@ fn read_isolation(b: &Block, i: &mut Isolation) -> Result<()> {
         };
     }
     if let Some(p) = symbol(b, "pid")? {
-        i.pid = if p == "host" { PidMode::Host } else { PidMode::Private };
+        i.pid = if p == "host" {
+            PidMode::Host
+        } else {
+            PidMode::Private
+        };
     }
     if let Some(s) = boolean(b, "shm")? {
         i.shm = s;
@@ -371,7 +382,11 @@ fn read_integration(
             .collect::<Result<_>>()?;
     }
     if let Some(d) = symbol(b, "dbus")? {
-        i.dbus = if d == "session" { Dbus::Session } else { Dbus::None };
+        i.dbus = if d == "session" {
+            Dbus::Session
+        } else {
+            Dbus::None
+        };
     }
     if let Some(f) = boolean(b, "fonts")? {
         i.fonts = f;
@@ -399,7 +414,9 @@ fn read_integration(
     }
     if let Some(d) = child(b, "desktop") {
         let icon_png = match string(&d, "icon")? {
-            Some(p) => Some(std::fs::read(root.join(&p)).with_context(|| format!("read icon {p}"))?),
+            Some(p) => {
+                Some(std::fs::read(root.join(&p)).with_context(|| format!("read icon {p}"))?)
+            }
             None => None,
         };
         *desktop = Some(Desktop {
@@ -427,7 +444,11 @@ pub fn validate(plan: &Plan) -> Vec<String> {
     }
     for l in &plan.data_layers {
         if !l.source.is_dir() {
-            issues.push(format!("layer {}: {} is not a directory", l.name, l.source.display()));
+            issues.push(format!(
+                "layer {}: {} is not a directory",
+                l.name,
+                l.source.display()
+            ));
         }
         if !l.mount.starts_with('/') {
             issues.push(format!("layer {}: mount must be an absolute path", l.name));

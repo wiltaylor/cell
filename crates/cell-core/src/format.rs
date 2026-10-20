@@ -72,18 +72,25 @@ pub enum LayerRole {
 pub enum Placement {
     Embedded,
     /// A file beside the `.cell`, in `<name>.cell.d/<file>`.
-    Sidecar { file: String },
+    Sidecar {
+        file: String,
+    },
     /// A content-addressed file, `<layer>-<hash16>.layer`, that lives in
     /// the cell's directory and can be shared by every cell there. The
     /// launcher also looks in `CELL_LAYER_PATH`, `<name>.cell.d/`,
     /// `$XDG_DATA_HOME/cell/layers` and `$XDG_CACHE_HOME/cell/layers`.
-    Referenced { file: String },
+    Referenced {
+        file: String,
+    },
 }
 
 /// The file name of a referenced layer: the layer name plus the first 16
 /// hex digits of its BLAKE3 hash.
 pub fn referenced_file_name(layer_name: &str, blake3_hex: &str) -> String {
-    format!("{layer_name}-{}.layer", &blake3_hex[..16.min(blake3_hex.len())])
+    format!(
+        "{layer_name}-{}.layer",
+        &blake3_hex[..16.min(blake3_hex.len())]
+    )
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

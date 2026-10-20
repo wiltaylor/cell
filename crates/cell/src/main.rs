@@ -101,7 +101,11 @@ fn real_main() -> Result<()> {
                 let short = plan.id.rsplit('.').next().unwrap_or(&plan.id).to_string();
                 plan.root.join(format!("{short}.cell"))
             });
-            let out = if out.is_absolute() { out } else { std::env::current_dir()?.join(out) };
+            let out = if out.is_absolute() {
+                out
+            } else {
+                std::env::current_dir()?.join(out)
+            };
             let opts = build::Options {
                 out,
                 launcher: find_launcher(launcher)?,
@@ -122,7 +126,9 @@ fn real_main() -> Result<()> {
 }
 
 fn load(file: &Path) -> Result<model::Plan> {
-    let file = file.canonicalize().with_context(|| format!("find {}", file.display()))?;
+    let file = file
+        .canonicalize()
+        .with_context(|| format!("find {}", file.display()))?;
     let doc = model::open(&file)?;
     let root = file.parent().context("build file directory")?;
     model::plan(&doc, root)

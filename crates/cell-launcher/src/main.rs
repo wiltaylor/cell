@@ -76,7 +76,10 @@ fn real_main() -> Result<i32> {
     if cmd == "info" {
         println!("{} {} ({})", m.app.name, m.app.version, m.app.id);
         println!("file: {}", path.display());
-        println!("host: kernel {}, userns {}, fuse {}", host.kernel, host.userns, host.fuse);
+        println!(
+            "host: kernel {}, userns {}, fuse {}",
+            host.kernel, host.userns, host.fuse
+        );
         println!(
             "host: wayland {:?}, x11 {:?}, nvidia {:?}",
             host.wayland.as_ref().map(|p| p.display().to_string()),

@@ -196,7 +196,10 @@ fn download(version: &str, dest: &Path) -> Result<()> {
         fs::rename(&partial, dest)?;
         return Ok(());
     }
-    bail!("no download for NVIDIA driver {version} ({})", errors.join("; "))
+    bail!(
+        "no download for NVIDIA driver {version} ({})",
+        errors.join("; ")
+    )
 }
 
 /// Copy `src` to `dst` and print a line on stderr at each 10%.
@@ -314,7 +317,9 @@ fn payload_reader(run: &Path, offset: u64) -> Result<Box<dyn Read>> {
 
 /// Where an archive entry goes in the cache, or `None` to skip it.
 fn destination(rel: &Path, out: &FetchedDriver) -> Option<PathBuf> {
-    let mut parts = rel.components().map(|c| c.as_os_str().to_string_lossy().to_string());
+    let mut parts = rel
+        .components()
+        .map(|c| c.as_os_str().to_string_lossy().to_string());
     let first = parts.next()?;
     let second = parts.next();
     if parts.next().is_some() {
@@ -444,9 +449,17 @@ fn elf_soname(path: &Path) -> Option<String> {
     let u32_at = |b: &[u8], o: usize| u32::from_le_bytes(b[o..o + 4].try_into().unwrap());
     let u64_at = |b: &[u8], o: usize| u64::from_le_bytes(b[o..o + 8].try_into().unwrap());
     let (shoff, shentsize, shnum) = if is64 {
-        (u64_at(&hdr, 0x28), u16_at(&hdr, 0x3A) as usize, u16_at(&hdr, 0x3C) as usize)
+        (
+            u64_at(&hdr, 0x28),
+            u16_at(&hdr, 0x3A) as usize,
+            u16_at(&hdr, 0x3C) as usize,
+        )
     } else {
-        (u32_at(&hdr, 0x20) as u64, u16_at(&hdr, 0x2E) as usize, u16_at(&hdr, 0x30) as usize)
+        (
+            u32_at(&hdr, 0x20) as u64,
+            u16_at(&hdr, 0x2E) as usize,
+            u16_at(&hdr, 0x30) as usize,
+        )
     };
     if shoff == 0 || shentsize == 0 || shnum == 0 {
         return None;
@@ -458,9 +471,19 @@ fn elf_soname(path: &Path) -> Option<String> {
     let section = |i: usize| {
         let s = &table[i * shentsize..(i + 1) * shentsize];
         if is64 {
-            (u32_at(s, 4), u64_at(s, 0x18), u64_at(s, 0x20), u32_at(s, 0x28) as usize)
+            (
+                u32_at(s, 4),
+                u64_at(s, 0x18),
+                u64_at(s, 0x20),
+                u32_at(s, 0x28) as usize,
+            )
         } else {
-            (u32_at(s, 4), u32_at(s, 0x10) as u64, u32_at(s, 0x14) as u64, u32_at(s, 0x18) as usize)
+            (
+                u32_at(s, 4),
+                u32_at(s, 0x10) as u64,
+                u32_at(s, 0x14) as u64,
+                u32_at(s, 0x18) as usize,
+            )
         }
     };
     let read_section = |f: &mut File, off: u64, size: u64| -> Option<Vec<u8>> {
@@ -513,10 +536,22 @@ mod tests {
             dir: PathBuf::from("/c"),
         };
         let d = |p: &str| destination(Path::new(p), &out);
-        assert_eq!(d("libGLX_nvidia.so.615.71.09"), Some(PathBuf::from("/c/lib/libGLX_nvidia.so.615.71.09")));
-        assert_eq!(d("32/libcuda.so.615.71.09"), Some(PathBuf::from("/c/lib32/libcuda.so.615.71.09")));
-        assert_eq!(d("nvidia_icd.json"), Some(PathBuf::from("/c/share/nvidia_icd.json")));
-        assert_eq!(d("libvdpau_nvidia.so.1.0"), Some(PathBuf::from("/c/lib/vdpau/libvdpau_nvidia.so.1.0")));
+        assert_eq!(
+            d("libGLX_nvidia.so.615.71.09"),
+            Some(PathBuf::from("/c/lib/libGLX_nvidia.so.615.71.09"))
+        );
+        assert_eq!(
+            d("32/libcuda.so.615.71.09"),
+            Some(PathBuf::from("/c/lib32/libcuda.so.615.71.09"))
+        );
+        assert_eq!(
+            d("nvidia_icd.json"),
+            Some(PathBuf::from("/c/share/nvidia_icd.json"))
+        );
+        assert_eq!(
+            d("libvdpau_nvidia.so.1.0"),
+            Some(PathBuf::from("/c/lib/vdpau/libvdpau_nvidia.so.1.0"))
+        );
         assert_eq!(d("nvidia_drv.so"), None);
         assert_eq!(d("libGL.so.1.7.0"), None);
         assert_eq!(d("kernel/nvidia/nv.c"), None);
@@ -561,8 +596,14 @@ mod tests {
             dir: dir.to_path_buf(),
         };
         assert_eq!(unpack(&run, &out).unwrap(), (1, 1));
-        assert_eq!(fs::read(out.lib().join("libGLX_nvidia.so.1.2")).unwrap(), b"gl64");
-        assert_eq!(fs::read(out.lib32().join("libcuda.so.9")).unwrap(), b"cuda32");
+        assert_eq!(
+            fs::read(out.lib().join("libGLX_nvidia.so.1.2")).unwrap(),
+            b"gl64"
+        );
+        assert_eq!(
+            fs::read(out.lib32().join("libcuda.so.9")).unwrap(),
+            b"cuda32"
+        );
         assert!(out.share().join("nvidia_icd.json").exists());
         assert!(!out.lib().join("nvidia_drv.so").exists());
         let _ = fs::remove_dir_all(tmp);
@@ -587,7 +628,11 @@ mod tests {
 
     #[test]
     fn soname_of_host_libc() {
-        for p in ["/usr/lib/libc.so.6", "/usr/lib64/libc.so.6", "/usr/lib/x86_64-linux-gnu/libc.so.6"] {
+        for p in [
+            "/usr/lib/libc.so.6",
+            "/usr/lib64/libc.so.6",
+            "/usr/lib/x86_64-linux-gnu/libc.so.6",
+        ] {
             if Path::new(p).exists() {
                 assert_eq!(elf_soname(Path::new(p)).as_deref(), Some("libc.so.6"));
                 return;

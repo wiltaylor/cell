@@ -164,7 +164,8 @@ impl Squashfs {
     /// Open an image that starts at `base` inside `file`.
     pub fn open(file: File, base: u64) -> Result<Self> {
         let mut sbb = [0u8; 96];
-        file.read_exact_at(&mut sbb, base).context("read superblock")?;
+        file.read_exact_at(&mut sbb, base)
+            .context("read superblock")?;
         if u32_at(&sbb, 0) != MAGIC {
             bail!("not a squashfs image at offset {base}");
         }
@@ -359,7 +360,8 @@ impl Squashfs {
                 let frag_index = u32_at(&b, 4);
                 let frag_offset = u32_at(&b, 8);
                 let size = u32_at(&b, 12) as u64;
-                let kind = self.file_kind(&mut c, blocks_start, size, frag_index, frag_offset, bs)?;
+                let kind =
+                    self.file_kind(&mut c, blocks_start, size, frag_index, frag_offset, bs)?;
                 (1, kind)
             }
             9 => {
@@ -369,7 +371,8 @@ impl Squashfs {
                 let nlink = u32_at(&b, 24);
                 let frag_index = u32_at(&b, 28);
                 let frag_offset = u32_at(&b, 32);
-                let kind = self.file_kind(&mut c, blocks_start, size, frag_index, frag_offset, bs)?;
+                let kind =
+                    self.file_kind(&mut c, blocks_start, size, frag_index, frag_offset, bs)?;
                 (nlink, kind)
             }
             3 | 10 => {
@@ -404,12 +407,26 @@ impl Squashfs {
             6 | 7 => {
                 let b = c.take(4)?;
                 let nlink = u32_at(&b, 0);
-                (nlink, if itype == 6 { InodeKind::Fifo } else { InodeKind::Socket })
+                (
+                    nlink,
+                    if itype == 6 {
+                        InodeKind::Fifo
+                    } else {
+                        InodeKind::Socket
+                    },
+                )
             }
             13 | 14 => {
                 let b = c.take(8)?;
                 let nlink = u32_at(&b, 0);
-                (nlink, if itype == 13 { InodeKind::Fifo } else { InodeKind::Socket })
+                (
+                    nlink,
+                    if itype == 13 {
+                        InodeKind::Fifo
+                    } else {
+                        InodeKind::Socket
+                    },
+                )
             }
             other => bail!("unknown inode type {other}"),
         };
@@ -502,7 +519,13 @@ impl Squashfs {
         Ok(out)
     }
 
-    fn data_block(&self, abs: u64, word: u32, uncompressed_flag: bool, cap: usize) -> Result<Arc<Vec<u8>>> {
+    fn data_block(
+        &self,
+        abs: u64,
+        word: u32,
+        uncompressed_flag: bool,
+        cap: usize,
+    ) -> Result<Arc<Vec<u8>>> {
         if let Some(hit) = self.data.lock().unwrap().get(abs) {
             return Ok(hit);
         }
@@ -510,7 +533,11 @@ impl Squashfs {
         let raw = word & 0x0100_0000 != 0 || uncompressed_flag;
         let mut buf = vec![0u8; size];
         self.read_at(&mut buf, abs)?;
-        let data = if raw { buf } else { self.decompress(&buf, cap)? };
+        let data = if raw {
+            buf
+        } else {
+            self.decompress(&buf, cap)?
+        };
         let data = Arc::new(data);
         self.data.lock().unwrap().put(abs, data.clone());
         Ok(data)
@@ -564,7 +591,10 @@ impl Squashfs {
                 let frag = self.data_block(fstart, fword, uncomp_frag, bs as usize)?;
                 let tail_len = (size - bi as u64 * bs) as usize;
                 let fo = frag_offset as usize;
-                let slice = frag.get(fo..fo + tail_len).context("fragment too short")?.to_vec();
+                let slice = frag
+                    .get(fo..fo + tail_len)
+                    .context("fragment too short")?
+                    .to_vec();
                 (Some(Arc::new(slice)), tail_len)
             };
             let take = ((end - pos) as usize).min(chunk_len - within);

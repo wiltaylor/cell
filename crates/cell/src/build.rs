@@ -13,7 +13,7 @@ use cell_core::format::{
 };
 use cell_core::sandbox::{self, BindSpec, Layer, LayerSource, Spec};
 
-use crate::model::{BuildStep, Plan, PlacementKind};
+use crate::model::{BuildStep, PlacementKind, Plan};
 use crate::unpack;
 
 pub struct Options {
@@ -71,7 +71,10 @@ fn base_rootfs(plan: &Plan, no_cache: bool) -> Result<(PathBuf, String)> {
             .output()
             .context("docker create (is docker installed and usable without root?)")?;
         if !out.status.success() {
-            bail!("docker create {image}: {}", String::from_utf8_lossy(&out.stderr));
+            bail!(
+                "docker create {image}: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
         }
         let id = String::from_utf8_lossy(&out.stdout).trim().to_string();
         let st = Command::new("docker")
@@ -103,7 +106,10 @@ fn base_rootfs(plan: &Plan, no_cache: bool) -> Result<(PathBuf, String)> {
     status("base: extracting");
     let reader = unpack::open_compressed(&tar_path, base)?;
     // Arch bootstrap tarballs wrap everything in `root.x86_64/`.
-    let opts = unpack::Options { strip_root_dir: true, whiteouts: false };
+    let opts = unpack::Options {
+        strip_root_dir: true,
+        whiteouts: false,
+    };
     unpack::unpack_tar(reader, &rootfs, &opts)?;
     let _ = fs::remove_file(&tar_path);
     fs::write(&stamp, b"ok")?;
@@ -114,9 +120,15 @@ fn base_rootfs(plan: &Plan, no_cache: bool) -> Result<(PathBuf, String)> {
 
 fn build_env() -> Vec<(String, String)> {
     vec![
-        ("PATH".into(), "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin".into()),
+        (
+            "PATH".into(),
+            "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin".into(),
+        ),
         ("HOME".into(), "/root".into()),
-        ("TERM".into(), std::env::var("TERM").unwrap_or_else(|_| "xterm".into())),
+        (
+            "TERM".into(),
+            std::env::var("TERM").unwrap_or_else(|_| "xterm".into()),
+        ),
         ("LANG".into(), "C.UTF-8".into()),
         ("DEBIAN_FRONTEND".into(), "noninteractive".into()),
         ("CELL_BUILD".into(), "1".into()),
@@ -126,7 +138,10 @@ fn build_env() -> Vec<(String, String)> {
 /// Run one shell command as root in a sandbox over `lower` with `upper`.
 fn run_step(lower: LayerSource, upper: &Path, workdir: &Path, cmd: &str, sbx: &Path) -> Result<()> {
     let mut spec = Spec {
-        layers: vec![Layer { source: lower, mount: "/".into() }],
+        layers: vec![Layer {
+            source: lower,
+            mount: "/".into(),
+        }],
         upper: Some((upper.to_path_buf(), workdir.to_path_buf())),
         env: build_env(),
         exec: sh(cmd),
@@ -172,7 +187,16 @@ fn mksquashfs(src: &Path, out: &Path, compress: bool, one_fs: bool) -> Result<()
     let _ = fs::remove_file(out);
     let mut c = Command::new("mksquashfs");
     c.arg(src).arg(out);
-    c.args(["-noappend", "-no-recovery", "-quiet", "-no-progress", "-b", "1M", "-comp", "zstd"]);
+    c.args([
+        "-noappend",
+        "-no-recovery",
+        "-quiet",
+        "-no-progress",
+        "-b",
+        "1M",
+        "-comp",
+        "zstd",
+    ]);
     if compress {
         c.args(["-Xcompression-level", "15"]);
     } else {
@@ -182,7 +206,9 @@ fn mksquashfs(src: &Path, out: &Path, compress: bool, one_fs: bool) -> Result<()
         c.arg("-one-file-system");
     }
     status(&format!("pack: {} -> {}", src.display(), out.display()));
-    let st = c.status().context("run mksquashfs (install squashfs-tools)")?;
+    let st = c
+        .status()
+        .context("run mksquashfs (install squashfs-tools)")?;
     if !st.success() {
         bail!("mksquashfs failed: {st}");
     }
@@ -228,11 +254,15 @@ fn package_command(base: &Path, plan: &Plan) -> Option<String> {
     } else if base.join("sbin/apk").exists() {
         Some(format!("apk add --no-cache {list}"))
     } else if base.join("usr/bin/apt-get").exists() {
-        Some(format!("apt-get update && apt-get install -y --no-install-recommends {list}"))
+        Some(format!(
+            "apt-get update && apt-get install -y --no-install-recommends {list}"
+        ))
     } else if base.join("usr/bin/dnf").exists() {
         Some(format!("dnf install -y {list}"))
     } else {
-        Some(format!("echo 'no known package manager in the base' >&2; exit 1 # {list}"))
+        Some(format!(
+            "echo 'no known package manager in the base' >&2; exit 1 # {list}"
+        ))
     }
 }
 
@@ -421,12 +451,16 @@ fn assemble(
                 let file = format::referenced_file_name(name, &hash);
                 let dest = out_dir.join(&file);
                 if dest.is_file() && fs::metadata(&dest)?.len() == size {
-                    status(&format!("layer {name}: {file} already beside the output, shared"));
+                    status(&format!(
+                        "layer {name}: {file} already beside the output, shared"
+                    ));
                 } else {
                     let tmp = out_dir.join(format!("{file}.partial"));
                     fs::copy(src, &tmp)?;
                     fs::rename(&tmp, &dest)?;
-                    status(&format!("layer {name}: written as {file} beside the output"));
+                    status(&format!(
+                        "layer {name}: written as {file} beside the output"
+                    ));
                 }
                 (Placement::Referenced { file }, 0)
             }
@@ -443,8 +477,22 @@ fn assemble(
         });
         Ok(())
     };
-    place(&mut out, "runtime", LayerRole::Runtime, "/", runtime_sqfs, plan.runtime.placement)?;
-    place(&mut out, "app", LayerRole::App, "/", app_sqfs, PlacementKind::Embedded)?;
+    place(
+        &mut out,
+        "runtime",
+        LayerRole::Runtime,
+        "/",
+        runtime_sqfs,
+        plan.runtime.placement,
+    )?;
+    place(
+        &mut out,
+        "app",
+        LayerRole::App,
+        "/",
+        app_sqfs,
+        PlacementKind::Embedded,
+    )?;
     for (l, p) in data {
         place(&mut out, &l.name, LayerRole::Data, &l.mount, p, l.placement)?;
     }
@@ -493,7 +541,10 @@ fn assemble(
 pub fn inspect(path: &Path) -> Result<()> {
     let cell = format::CellFile::open(path)?;
     let m = &cell.manifest;
-    println!("{} {} ({}, {})", m.app.name, m.app.version, m.app.id, m.app.arch);
+    println!(
+        "{} {} ({}, {})",
+        m.app.name, m.app.version, m.app.id, m.app.arch
+    );
     println!("launcher: {} bytes", cell.trailer.launcher_len);
     for l in &m.layers {
         println!(
@@ -503,7 +554,13 @@ pub fn inspect(path: &Path) -> Result<()> {
     }
     println!("entry: {:?}", m.entry.exec);
     println!("isolation: {:?}", m.isolation);
-    println!("integration: display={:?} audio={:?} input={:?} dbus={:?} gpu={:?}",
-        m.integration.display, m.integration.audio, m.integration.input, m.integration.dbus, m.integration.gpu);
+    println!(
+        "integration: display={:?} audio={:?} input={:?} dbus={:?} gpu={:?}",
+        m.integration.display,
+        m.integration.audio,
+        m.integration.input,
+        m.integration.dbus,
+        m.integration.gpu
+    );
     Ok(())
 }

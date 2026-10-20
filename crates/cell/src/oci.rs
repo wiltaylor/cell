@@ -68,7 +68,11 @@ impl Reference {
             bail!("no repository in image reference `{image}`");
         }
         let (registry, repo) = if host == "docker.io" || host == "index.docker.io" {
-            let repo = if path.contains('/') { path } else { format!("library/{path}") };
+            let repo = if path.contains('/') {
+                path
+            } else {
+                format!("library/{path}")
+            };
             ("registry-1.docker.io".to_string(), repo)
         } else {
             (host, path)
@@ -82,16 +86,27 @@ impl Reference {
             }
             None => tag.unwrap_or("latest").to_string(),
         };
-        Ok(Reference { registry, repo, reference })
+        Ok(Reference {
+            registry,
+            repo,
+            reference,
+        })
     }
 
     fn url(&self, kind: &str, item: &str) -> String {
-        format!("https://{}/v2/{}/{}/{}", self.registry, self.repo, kind, item)
+        format!(
+            "https://{}/v2/{}/{}/{}",
+            self.registry, self.repo, kind, item
+        )
     }
 
     /// The reference as a readable string.
     pub fn display(&self) -> String {
-        let sep = if self.reference.starts_with("sha256:") { "@" } else { ":" };
+        let sep = if self.reference.starts_with("sha256:") {
+            "@"
+        } else {
+            ":"
+        };
         format!("{}/{}{}{}", self.registry, self.repo, sep, self.reference)
     }
 }
@@ -174,7 +189,9 @@ impl Client {
             if (code == 429 || code >= 500) && attempt < 4 {
                 attempt += 1;
                 let wait = 5 * (1 << attempt);
-                status(&format!("registry answered {code}; waiting {wait}s before retry"));
+                status(&format!(
+                    "registry answered {code}; waiting {wait}s before retry"
+                ));
                 std::thread::sleep(Duration::from_secs(wait));
                 continue;
             }
@@ -193,7 +210,9 @@ impl Client {
         let mut realm = None;
         let mut query = Vec::new();
         for part in split_challenge(params) {
-            let Some((k, v)) = part.split_once('=') else { continue };
+            let Some((k, v)) = part.split_once('=') else {
+                continue;
+            };
             let v = v.trim().trim_matches('"');
             match k.trim() {
                 "realm" => realm = Some(v.to_string()),
@@ -222,8 +241,17 @@ impl Client {
         let url = r.url("manifests", item);
         let mut resp = self.get(&url, Some(ACCEPT))?;
         let media_type = header(&resp, "content-type").unwrap_or_default();
-        let media_type = media_type.split(';').next().unwrap_or("").trim().to_string();
-        let body = resp.body_mut().with_config().limit(32 << 20).read_to_vec()?;
+        let media_type = media_type
+            .split(';')
+            .next()
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        let body = resp
+            .body_mut()
+            .with_config()
+            .limit(32 << 20)
+            .read_to_vec()?;
         let computed = format!("sha256:{:x}", Sha256::digest(&body));
         if item.starts_with("sha256:") && computed != item {
             bail!("manifest {item} has digest {computed}");
@@ -251,7 +279,10 @@ impl Client {
         } else if is_manifest(&media_type) {
             (digest, doc)
         } else {
-            bail!("unsupported manifest type `{media_type}` for {}", r.display());
+            bail!(
+                "unsupported manifest type `{media_type}` for {}",
+                r.display()
+            );
         };
         let layers = doc
             .get("layers")
@@ -288,7 +319,9 @@ impl Client {
         let mut buf = vec![0u8; 1 << 20];
         let mut total = 0u64;
         loop {
-            let n = reader.read(&mut buf).with_context(|| format!("read {url}"))?;
+            let n = reader
+                .read(&mut buf)
+                .with_context(|| format!("read {url}"))?;
             if n == 0 {
                 break;
             }
@@ -345,7 +378,9 @@ fn pick_platform(index: &Value, arch: &str) -> Option<String> {
         .filter(|m| {
             let p = m.get("platform");
             let os = p.and_then(|p| p.get("os")).and_then(Value::as_str);
-            let a = p.and_then(|p| p.get("architecture")).and_then(Value::as_str);
+            let a = p
+                .and_then(|p| p.get("architecture"))
+                .and_then(Value::as_str);
             os == Some("linux") && a == Some(arch)
         })
         .collect();
@@ -363,7 +398,9 @@ fn pick_platform(index: &Value, arch: &str) -> Option<String> {
         .find(|m| variant(m).is_empty())
         .or_else(|| candidates.iter().find(|m| variant(m) == "v8"))
         .or_else(|| candidates.first())?;
-    best.get("digest").and_then(Value::as_str).map(str::to_string)
+    best.get("digest")
+        .and_then(Value::as_str)
+        .map(str::to_string)
 }
 
 /// Split the parameters of an auth challenge at commas outside quotes.
@@ -442,11 +479,19 @@ pub fn rootfs(image: &str, arch: &str, no_cache: bool) -> Result<(PathBuf, Strin
             // Without a network, a rootfs that this reference gave before
             // still serves.
             let last = fs::read_to_string(&ref_file).ok();
-            let hex = last.as_deref().and_then(|d| d.strip_prefix("sha256:")).map(str::to_string);
+            let hex = last
+                .as_deref()
+                .and_then(|d| d.strip_prefix("sha256:"))
+                .map(str::to_string);
             match hex {
                 Some(hex) if cache.join("rootfs").join(&hex).join("ok").exists() && !no_cache => {
-                    status(&format!("warning: {e:#}; using the last rootfs for this reference"));
-                    return Ok((cache.join("rootfs").join(&hex).join("rootfs"), format!("sha256:{hex}")));
+                    status(&format!(
+                        "warning: {e:#}; using the last rootfs for this reference"
+                    ));
+                    return Ok((
+                        cache.join("rootfs").join(&hex).join("rootfs"),
+                        format!("sha256:{hex}"),
+                    ));
                 }
                 _ => return Err(e),
             }
@@ -461,7 +506,10 @@ pub fn rootfs(image: &str, arch: &str, no_cache: bool) -> Result<(PathBuf, Strin
     let rootfs = dir.join("rootfs");
     let stamp = dir.join("ok");
     if stamp.exists() && !no_cache {
-        status(&format!("base oci://{image}: cached ({})", &resolved.digest[..19]));
+        status(&format!(
+            "base oci://{image}: cached ({})",
+            &resolved.digest[..19]
+        ));
         return Ok((rootfs, resolved.digest));
     }
     let _ = fs::remove_dir_all(&dir);
@@ -475,14 +523,25 @@ pub fn rootfs(image: &str, arch: &str, no_cache: bool) -> Result<(PathBuf, Strin
         let blob = blobs.join(layer_hex);
         let short = &layer.digest[7..19];
         if blob.exists() {
-            status(&format!("layer {}/{n} {short} {}: cached", i + 1, mib(layer.size)));
+            status(&format!(
+                "layer {}/{n} {short} {}: cached",
+                i + 1,
+                mib(layer.size)
+            ));
         } else {
-            status(&format!("layer {}/{n} {short} {}: downloading", i + 1, mib(layer.size)));
+            status(&format!(
+                "layer {}/{n} {short} {}: downloading",
+                i + 1,
+                mib(layer.size)
+            ));
             client.fetch_blob(&r, &layer.digest, &blob)?;
         }
         status(&format!("layer {}/{n} {short}: applying", i + 1));
         let reader = unpack::open_compressed(&blob, &layer.media_type)?;
-        let opts = unpack::Options { strip_root_dir: false, whiteouts: true };
+        let opts = unpack::Options {
+            strip_root_dir: false,
+            whiteouts: true,
+        };
         unpack::unpack_tar(reader, &rootfs, &opts)
             .with_context(|| format!("apply layer {}", layer.digest))?;
     }
@@ -503,15 +562,27 @@ mod tests {
     fn parse_references() {
         assert_eq!(
             parsed("alpine:3.22"),
-            ("registry-1.docker.io".into(), "library/alpine".into(), "3.22".into())
+            (
+                "registry-1.docker.io".into(),
+                "library/alpine".into(),
+                "3.22".into()
+            )
         );
         assert_eq!(
             parsed("archlinux"),
-            ("registry-1.docker.io".into(), "library/archlinux".into(), "latest".into())
+            (
+                "registry-1.docker.io".into(),
+                "library/archlinux".into(),
+                "latest".into()
+            )
         );
         assert_eq!(
             parsed("docker.io/library/archlinux:base"),
-            ("registry-1.docker.io".into(), "library/archlinux".into(), "base".into())
+            (
+                "registry-1.docker.io".into(),
+                "library/archlinux".into(),
+                "base".into()
+            )
         );
         assert_eq!(
             parsed("ghcr.io/owner/image:tag"),

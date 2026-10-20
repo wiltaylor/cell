@@ -39,7 +39,9 @@ pub fn probe() -> HostProbe {
         .unwrap_or_default()
         .trim()
         .to_string();
-    let mut parts = kernel.split(|c: char| !c.is_ascii_digit()).filter(|s| !s.is_empty());
+    let mut parts = kernel
+        .split(|c: char| !c.is_ascii_digit())
+        .filter(|s| !s.is_empty());
     let kernel_tuple = (
         parts.next().and_then(|s| s.parse().ok()).unwrap_or(0),
         parts.next().and_then(|s| s.parse().ok()).unwrap_or(0),
@@ -131,6 +133,8 @@ pub fn data_home() -> PathBuf {
 pub fn cache_home() -> PathBuf {
     env("XDG_CACHE_HOME")
         .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(env("HOME").unwrap_or_else(|| "/tmp".into())).join(".cache"))
+        .unwrap_or_else(|| {
+            PathBuf::from(env("HOME").unwrap_or_else(|| "/tmp".into())).join(".cache")
+        })
         .join("cell")
 }

@@ -83,7 +83,10 @@ pub fn find_host_driver_dirs() -> Vec<DriverDir> {
         "/usr/lib/nvidia32",
     ];
     let mut out = Vec::new();
-    for (list, lib32) in [(candidates64.as_slice(), false), (candidates32.as_slice(), true)] {
+    for (list, lib32) in [
+        (candidates64.as_slice(), false),
+        (candidates32.as_slice(), true),
+    ] {
         for c in list {
             let p = Path::new(c);
             let libs = scan_driver_dir(p);
@@ -105,10 +108,22 @@ pub fn host_extra_files() -> Vec<(PathBuf, &'static str)> {
     let mut v = Vec::new();
     for (p, rel) in [
         ("/usr/lib/gbm/nvidia-drm_gbm.so", "gbm/nvidia-drm_gbm.so"),
-        ("/usr/lib/x86_64-linux-gnu/gbm/nvidia-drm_gbm.so", "gbm/nvidia-drm_gbm.so"),
-        ("/run/opengl-driver/lib/gbm/nvidia-drm_gbm.so", "gbm/nvidia-drm_gbm.so"),
-        ("/usr/lib/vdpau/libvdpau_nvidia.so.1", "vdpau/libvdpau_nvidia.so.1"),
-        ("/usr/lib/x86_64-linux-gnu/vdpau/libvdpau_nvidia.so.1", "vdpau/libvdpau_nvidia.so.1"),
+        (
+            "/usr/lib/x86_64-linux-gnu/gbm/nvidia-drm_gbm.so",
+            "gbm/nvidia-drm_gbm.so",
+        ),
+        (
+            "/run/opengl-driver/lib/gbm/nvidia-drm_gbm.so",
+            "gbm/nvidia-drm_gbm.so",
+        ),
+        (
+            "/usr/lib/vdpau/libvdpau_nvidia.so.1",
+            "vdpau/libvdpau_nvidia.so.1",
+        ),
+        (
+            "/usr/lib/x86_64-linux-gnu/vdpau/libvdpau_nvidia.so.1",
+            "vdpau/libvdpau_nvidia.so.1",
+        ),
     ] {
         if Path::new(p).exists() {
             v.push((PathBuf::from(p), rel));

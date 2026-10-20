@@ -21,7 +21,11 @@ pub struct StateDirs {
 /// The lock lives as long as the returned file.
 pub fn instance_lock(state: &StateDirs) -> Result<Option<std::fs::File>> {
     use std::os::unix::io::AsRawFd;
-    let path = state.upper.parent().unwrap_or(&state.upper).join("instance.lock");
+    let path = state
+        .upper
+        .parent()
+        .unwrap_or(&state.upper)
+        .join("instance.lock");
     let f = std::fs::OpenOptions::new()
         .create(true)
         .truncate(false)
@@ -101,13 +105,25 @@ pub fn build_spec(
 
     // Identity and base environment.
     let home = host.home.to_string_lossy().to_string();
-    env(&mut spec, "PATH", "/usr/local/sbin:/usr/local/bin:/usr/bin:/bin");
+    env(
+        &mut spec,
+        "PATH",
+        "/usr/local/sbin:/usr/local/bin:/usr/bin:/bin",
+    );
     env(&mut spec, "HOME", home.clone());
     env(&mut spec, "USER", host.user.clone());
     env(&mut spec, "LOGNAME", host.user.clone());
     env(&mut spec, "SHELL", "/bin/sh");
-    env(&mut spec, "TERM", host_env("TERM").unwrap_or_else(|| "xterm".into()));
-    env(&mut spec, "LANG", host_env("LANG").unwrap_or_else(|| "C.UTF-8".into()));
+    env(
+        &mut spec,
+        "TERM",
+        host_env("TERM").unwrap_or_else(|| "xterm".into()),
+    );
+    env(
+        &mut spec,
+        "LANG",
+        host_env("LANG").unwrap_or_else(|| "C.UTF-8".into()),
+    );
     env(&mut spec, "XDG_RUNTIME_DIR", run_user.clone());
     env(&mut spec, "XDG_DATA_DIRS", "/usr/local/share:/usr/share");
     env(&mut spec, "XDG_CONFIG_DIRS", "/etc/xdg");
@@ -125,8 +141,10 @@ pub fn build_spec(
         u = host.user,
         g = host.gid
     );
-    spec.files.push(("/etc/passwd".into(), passwd.into_bytes(), 0o644));
-    spec.files.push(("/etc/group".into(), group.into_bytes(), 0o644));
+    spec.files
+        .push(("/etc/passwd".into(), passwd.into_bytes(), 0o644));
+    spec.files
+        .push(("/etc/group".into(), group.into_bytes(), 0o644));
 
     // Home.
     match m.isolation.home {
@@ -178,7 +196,12 @@ pub fn build_spec(
         if let (Some(sock), Some(display)) = (&host.x11_socket, &host.display) {
             let name = sock.file_name().unwrap().to_string_lossy().to_string();
             let num = cell_core::xauth::display_number(display).unwrap_or_default();
-            bind(&mut spec, sock, format!("/tmp/.X11-unix/{name}"), BindMode::Rw);
+            bind(
+                &mut spec,
+                sock,
+                format!("/tmp/.X11-unix/{name}"),
+                BindMode::Rw,
+            );
             env(&mut spec, "DISPLAY", format!(":{num}"));
             if !want_wayland || host.wayland.is_none() {
                 env(&mut spec, "XDG_SESSION_TYPE", "x11");
@@ -207,8 +230,17 @@ pub fn build_spec(
     }
     if m.integration.audio.contains(&Audio::Pulse) {
         if let Some(p) = &host.pulse {
-            bind(&mut spec, p, format!("{run_user}/pulse/native"), BindMode::Rw);
-            env(&mut spec, "PULSE_SERVER", format!("unix:{run_user}/pulse/native"));
+            bind(
+                &mut spec,
+                p,
+                format!("{run_user}/pulse/native"),
+                BindMode::Rw,
+            );
+            env(
+                &mut spec,
+                "PULSE_SERVER",
+                format!("unix:{run_user}/pulse/native"),
+            );
             report.push("audio: pulseaudio".into());
         }
     }
@@ -250,7 +282,12 @@ pub fn build_spec(
 
     // Fonts and themes from the host.
     if m.integration.fonts {
-        bind(&mut spec, "/usr/share/fonts", "/run/host/fonts", BindMode::Ro);
+        bind(
+            &mut spec,
+            "/usr/share/fonts",
+            "/run/host/fonts",
+            BindMode::Ro,
+        );
         bind(
             &mut spec,
             host.home.join(".local/share/fonts"),
@@ -272,9 +309,23 @@ pub fn build_spec(
         report.push("fonts: host fonts under /run/host".into());
     }
     if m.integration.themes {
-        bind(&mut spec, "/usr/share/icons", "/run/host/icons", BindMode::Ro);
-        bind(&mut spec, "/usr/share/themes", "/run/host/themes", BindMode::Ro);
-        env(&mut spec, "XCURSOR_PATH", "/run/host/icons:/usr/share/icons");
+        bind(
+            &mut spec,
+            "/usr/share/icons",
+            "/run/host/icons",
+            BindMode::Ro,
+        );
+        bind(
+            &mut spec,
+            "/usr/share/themes",
+            "/run/host/themes",
+            BindMode::Ro,
+        );
+        env(
+            &mut spec,
+            "XCURSOR_PATH",
+            "/run/host/icons:/usr/share/icons",
+        );
         if let Some(t) = host_env("XCURSOR_THEME") {
             env(&mut spec, "XCURSOR_THEME", t);
         }
@@ -367,7 +418,11 @@ enum NvidiaSource {
 /// `:auto` tries the cache and the download first, then the host.
 /// `:host` uses the host only. `None` means no userspace was found; the
 /// report says why.
-fn nvidia_source(mode: NvidiaMode, version: &str, report: &mut Vec<String>) -> Option<NvidiaSource> {
+fn nvidia_source(
+    mode: NvidiaMode,
+    version: &str,
+    report: &mut Vec<String>,
+) -> Option<NvidiaSource> {
     let fetched = |report: &mut Vec<String>| match cell_core::nvidia_fetch::fetch(version) {
         Ok(d) => {
             let dirs = cell_core::gpu::fetched_driver_dirs(&d.dir);
@@ -426,7 +481,11 @@ fn nvidia_userspace(spec: &mut Spec, version: &str, src: &NvidiaSource, report: 
     match src {
         NvidiaSource::Host(dirs) => {
             for d in dirs {
-                let guest = if d.lib32 { "/run/host/lib32" } else { "/run/host/lib" };
+                let guest = if d.lib32 {
+                    "/run/host/lib32"
+                } else {
+                    "/run/host/lib"
+                };
                 bind(spec, &d.dir, guest, BindMode::Ro);
                 guest_dirs.push((guest.to_string(), d));
                 report.push(format!(
@@ -436,7 +495,12 @@ fn nvidia_userspace(spec: &mut Spec, version: &str, src: &NvidiaSource, report: 
                 ));
             }
             for (host_path, rel) in cell_core::gpu::host_extra_files() {
-                bind(spec, host_path, format!("/run/cell/gpu/extra/{rel}"), BindMode::Ro);
+                bind(
+                    spec,
+                    host_path,
+                    format!("/run/cell/gpu/extra/{rel}"),
+                    BindMode::Ro,
+                );
                 if rel.starts_with("gbm/") {
                     gbm_dir = Some("/run/cell/gpu/extra/gbm".to_string());
                 } else if rel.starts_with("vdpau/") {
@@ -466,7 +530,11 @@ fn nvidia_userspace(spec: &mut Spec, version: &str, src: &NvidiaSource, report: 
     }
     let mut ld_conf = String::from("include /etc/ld.so.conf.d/*.conf\n");
     for (guest, d) in &guest_dirs {
-        let gpu_dir = if d.lib32 { "/run/cell/gpu/lib32" } else { "/run/cell/gpu/lib" };
+        let gpu_dir = if d.lib32 {
+            "/run/cell/gpu/lib32"
+        } else {
+            "/run/cell/gpu/lib"
+        };
         for lib in &d.libs {
             spec.symlinks
                 .push((format!("{gpu_dir}/{lib}"), format!("{guest}/{lib}")));
@@ -477,7 +545,9 @@ fn nvidia_userspace(spec: &mut Spec, version: &str, src: &NvidiaSource, report: 
     let share = "/run/cell/gpu/share";
     spec.files.push((
         format!("{share}/glvnd/egl_vendor.d/10_nvidia.json"),
-        cell_core::gpu::egl_vendor_json("").replace("\"/libEGL", "\"libEGL").into_bytes(),
+        cell_core::gpu::egl_vendor_json("")
+            .replace("\"/libEGL", "\"libEGL")
+            .into_bytes(),
         0o644,
     ));
     spec.files.push((
@@ -506,7 +576,11 @@ fn nvidia_userspace(spec: &mut Spec, version: &str, src: &NvidiaSource, report: 
     ]);
     spec.late_file_binds
         .push(("/run/cell/ld.so.cache".into(), "/etc/ld.so.cache".into()));
-    env(spec, "XDG_DATA_DIRS", format!("{share}:/usr/local/share:/usr/share"));
+    env(
+        spec,
+        "XDG_DATA_DIRS",
+        format!("{share}:/usr/local/share:/usr/share"),
+    );
     env(
         spec,
         "__EGL_VENDOR_LIBRARY_DIRS",
