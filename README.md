@@ -85,8 +85,9 @@ Cell's goals:
 ## Quick start
 
 You need a Linux host with unprivileged user namespaces and the `fuse`
-module (every mainstream distribution has both). Get `cell-builder.cell`
-from the releases page or build it as shown under
+module (every mainstream distribution has both). Download `cell-builder.cell`
+from the [releases page](https://github.com/wiltaylor/cell/releases),
+`chmod +x` it, or build it as shown under
 [Building from source](#building-from-source).
 
 1. Write `cell.wcl` in a directory with your app's files:
