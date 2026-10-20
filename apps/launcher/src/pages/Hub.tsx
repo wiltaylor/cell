@@ -3,7 +3,7 @@ import { A } from "@solidjs/router";
 import { Badge, Button, Cover, fmtBytes } from "@cell/ui";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
-import { downloads, fail, library, notify, refetchLibrary, settings } from "../store";
+import { downloads, fail, library, notify, refetchLibrary, saveSettings, settings } from "../store";
 import type { HubGame } from "../types";
 
 export function Hub() {
@@ -32,16 +32,37 @@ export function Hub() {
     } catch (e) { fail(e); } finally { setBusy(null); }
   };
 
+  const [url, setUrl] = createSignal("");
+  const connect = async () => {
+    const u = url().trim().replace(/\/$/, "");
+    if (!u) return;
+    try { await saveSettings({ ...settings(), hub_url: u.startsWith("http") ? u : `http://${u}` }); notify("hub set"); refetch(); } catch (e) { fail(e); }
+  };
+  if (!settings().hub_url) {
+    return (
+      <>
+        <h1>Hub</h1>
+        <p class="muted">A hub is optional. Your library works without one. Connect to a Cell Hub to download games, see hosted servers and pair with peers.</p>
+        <div class="panel" style="max-width:560px">
+          <label class="field">Hub address
+            <input class="input" placeholder="http://hub.example:8787" value={url()} onInput={(e) => setUrl(e.currentTarget.value)} onKeyDown={(e) => e.key === "Enter" && connect()} />
+          </label>
+          <div class="btn-row" style="margin-top:12px"><Button variant="accent" onClick={connect}>Connect</Button></div>
+          <p class="muted small">Run your own with <code>cell-hub serve</code> or the Docker image; it prints an invite code to pair your profile.</p>
+        </div>
+      </>
+    );
+  }
   return (
     <>
       <div class="row" style="justify-content:space-between">
-        <div><h1>Hub</h1><p class="muted">{settings().hub_url || "No hub configured."} <A href="/settings">Change</A></p></div>
+        <div><h1>Hub</h1><p class="muted">{settings().hub_url} <A href="/settings">Change</A></p></div>
         <div class="btn-row">
           <Button variant="ghost" onClick={() => refetch()}>Refresh</Button>
           <Button variant="accent" onClick={uploadLocal} disabled={busy() !== null}>Upload a cell…</Button>
         </div>
       </div>
-      <Show when={games.error}><div class="empty">Cannot reach the hub: {String(games.error)}</div></Show>
+      <Show when={games.error}><div class="empty">Cannot reach the hub at {settings().hub_url}: {String(games.error)}. Is it running? <A href="/settings">Change the address</A>.</div></Show>
       <Show when={games()}>
         <Show when={games()!.length > 0} fallback={<div class="empty">The hub has no games yet.</div>}>
           <div class="grid">

@@ -28,7 +28,7 @@ export function Peers() {
   return (
     <>
       <h1>Peers</h1>
-      <Show when={me()} fallback={<div class="empty">Pair your <A href="/profile">profile</A> with a hub to see peers.</div>}>
+      <Show when={me()} fallback={<div class="empty"><Show when={settings().hub_url} fallback={<>No hub connected. Set one on the <A href="/hub">Hub</A> page.</>}>Pair your <A href="/profile">profile</A> with the hub to see peers.</Show></div>}>
         <p class="muted">Pair with people on {url()} to see when they are online and invite them to a server. One side makes a code, the other enters it.</p>
         <div class="row" style="align-items:flex-start">
           <div class="panel" style="flex:1; min-width:280px">

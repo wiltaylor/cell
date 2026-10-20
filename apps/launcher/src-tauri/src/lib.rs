@@ -24,7 +24,8 @@ impl Default for Settings {
         let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/tmp"));
         Settings {
             games_dir: home.join("Games/cells").to_string_lossy().to_string(),
-            hub_url: "http://127.0.0.1:8787".into(),
+            // No hub until the user connects one; the library works alone.
+            hub_url: String::new(),
             hub_token: String::new(),
         }
     }

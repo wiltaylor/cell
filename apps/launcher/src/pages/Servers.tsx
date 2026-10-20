@@ -19,8 +19,9 @@ export function Servers() {
   return (
     <>
       <h1>Game servers</h1>
-      <p class="muted">Servers hosted on {settings().hub_url}. Join them from the game with the host <code>{host()}</code>. Manage them in the hub's web UI.</p>
-      <Show when={!me()}><div class="empty">Pair your <A href="/profile">profile</A> with the hub to see its servers.</div></Show>
+      <Show when={settings().hub_url}><p class="muted">Servers hosted on {settings().hub_url}. Join them from the game with the host <code>{host()}</code>. Manage them in the hub's web UI.</p></Show>
+      <Show when={!settings().hub_url}><div class="empty">No hub connected. Set one on the <A href="/hub">Hub</A> page.</div></Show>
+      <Show when={settings().hub_url && !me()}><div class="empty">Pair your <A href="/profile">profile</A> with the hub to see its servers.</div></Show>
       <Show when={servers.error}><div class="empty">Cannot reach the hub: {String(servers.error)}</div></Show>
       <Show when={servers() && servers()!.length > 0} fallback={<Show when={servers() && servers()!.length === 0}><div class="empty">No servers on this hub.</div></Show>}>
         <table class="list">

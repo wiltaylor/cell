@@ -73,7 +73,7 @@ export function ProfilePage() {
             </div>
             <div class="panel" style="flex:1; min-width:320px">
               <h3 style="margin-top:0">Hub</h3>
-              <Show when={hub()} fallback={<p class="muted">No hub reachable at {settings().hub_url || "(unset)"}.</p>}>
+              <Show when={hub()} fallback={<p class="muted"><Show when={settings().hub_url} fallback={<>No hub connected. A hub is optional; set one on the Hub page when you want to download games or play with peers.</>}>Cannot reach the hub at {settings().hub_url}. Is it running?</Show></p>}>
                 <dl class="kv">
                   <dt>Name</dt><dd>{hub()!.name}</dd>
                   <dt>Fingerprint</dt><dd class="mono">{hub()!.fingerprint}</dd>
