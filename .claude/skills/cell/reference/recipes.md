@@ -39,9 +39,26 @@ app "dev.example.mygame" {                       // CHANGE
     input   = [:gamepad]
     fonts   = true
     gpu { enable = true nvidia = :auto }
+    desktop {                                    // CELL_CMD=install
+      icon       = "./art/icon.png"              // CHANGE: PNG, square
+      comment    = "One line for the menu"       // CHANGE
+      categories = ["Game"]
+      protocols  = ["mygame"]                    // CHANGE or remove: mygame:// links
+    }
+    steam {                                      // CELL_CMD=steam-add
+      portrait = "./art/portrait.png"            // CHANGE: 600x900
+      wide     = "./art/wide.png"                // CHANGE: 920x430
+      hero     = "./art/hero.png"                // CHANGE: 1920x620
+      logo     = "./art/logo.png"                // CHANGE: transparent PNG
+      tags     = ["Cell"]
+    }
   }
 }
 ```
+
+Make the art with ImageMagick from screenshots when the game ships none:
+`magick shot.png -resize 1920x1200^ -gravity center -extent 1920x620 art/hero.png`,
+`-extent 920x430` for `wide`, `-extent 600x900` for `portrait`.
 
 A game shipped as files instead of a package: add `build { copy { from = "./dist/game"
 to = "/app/game" } }` and `entry { exec = ["/app/game/run.sh"] cwd = "/app/game" }`.

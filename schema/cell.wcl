@@ -159,6 +159,7 @@ type Integration {
   @default(false) themes: bool?
   @child("gpu")     gpu:     Gpu?
   @child("desktop") desktop: DesktopEntry?
+  @child("steam")   steam:   SteamEntry?
 }
 
 @block("gpu")
@@ -172,6 +173,30 @@ type Gpu {
 type DesktopEntry {
   @doc("PNG icon, relative to the build file")
   icon: utf8?
+  @doc("One-line description shown in menus")
+  comment: utf8?
+  @doc("Freedesktop menu categories, for example Game, SportsGame")
   categories: list<utf8>?
+  @doc("MIME types the app opens")
   mime: list<utf8>?
+  @doc("URL schemes the app handles, for example [\"mygame\"] for mygame:// links")
+  protocols: list<utf8>?
+  @doc("Search keywords for the launcher")
+  keywords: list<utf8>?
+}
+
+@block("steam")
+type SteamEntry {
+  @doc("Library capsule PNG, 600x900, relative to the build file")
+  portrait: utf8?
+  @doc("Header capsule PNG, 920x430")
+  wide: utf8?
+  @doc("Library hero PNG, 1920x620")
+  hero: utf8?
+  @doc("Logo PNG with transparency, drawn over the hero")
+  logo: utf8?
+  @doc("Steam collection tags")
+  tags: list<utf8>?
+  @doc("Launch options for the Steam shortcut")
+  launch_options: utf8?
 }

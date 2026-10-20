@@ -509,6 +509,7 @@ fn assemble(
         integration: {
             let mut i = plan.integration.clone();
             i.desktop = plan.desktop.clone();
+            i.steam = plan.steam.clone();
             i
         },
         layers,

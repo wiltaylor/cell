@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{anyhow, bail, Context, Result};
 use cell_core::format::{
     Audio, Bind, BindMode, Dbus, Desktop, Display, Entry, Gpu, HomeMode, Input, Integration,
-    Isolation, NamedCommand, NvidiaMode, PidMode,
+    Isolation, NamedCommand, NvidiaMode, PidMode, Steam,
 };
 use wcl_lang::{disk_loader, Block, Document, Environment, Registry, Value};
 
@@ -68,6 +68,7 @@ pub struct Plan {
     pub isolation: Isolation,
     pub integration: Integration,
     pub desktop: Option<Desktop>,
+    pub steam: Option<Steam>,
     pub root: PathBuf,
 }
 
@@ -245,7 +246,13 @@ pub fn plan(doc: &Document, root: &Path) -> Result<Plan> {
             read_isolation(&i, &mut plan.isolation)?;
         }
         if let Some(i) = child(src, "integration") {
-            read_integration(&i, &mut plan.integration, &mut plan.desktop, root)?;
+            read_integration(
+                &i,
+                &mut plan.integration,
+                &mut plan.desktop,
+                &mut plan.steam,
+                root,
+            )?;
         }
     }
     if plan.runtime.base.is_empty() {
@@ -343,10 +350,23 @@ fn read_isolation(b: &Block, i: &mut Isolation) -> Result<()> {
     Ok(())
 }
 
+/// Read a PNG named in the build file. The bytes go into the manifest.
+fn png(root: &Path, b: &Block, field: &str) -> Result<Option<Vec<u8>>> {
+    let Some(p) = string(b, field)? else {
+        return Ok(None);
+    };
+    let bytes = std::fs::read(root.join(&p)).with_context(|| format!("read {field} {p}"))?;
+    if !bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+        bail!("{field}: {p} is not a PNG file");
+    }
+    Ok(Some(bytes))
+}
+
 fn read_integration(
     b: &Block,
     i: &mut Integration,
     desktop: &mut Option<Desktop>,
+    steam: &mut Option<Steam>,
     root: &Path,
 ) -> Result<()> {
     if b.field("display").is_some() {
@@ -413,16 +433,23 @@ fn read_integration(
         i.gpu = gpu;
     }
     if let Some(d) = child(b, "desktop") {
-        let icon_png = match string(&d, "icon")? {
-            Some(p) => {
-                Some(std::fs::read(root.join(&p)).with_context(|| format!("read icon {p}"))?)
-            }
-            None => None,
-        };
         *desktop = Some(Desktop {
-            icon_png,
+            icon_png: png(root, &d, "icon")?,
             categories: string_list(&d, "categories")?,
             mime: string_list(&d, "mime")?,
+            comment: string(&d, "comment")?,
+            protocols: string_list(&d, "protocols")?,
+            keywords: string_list(&d, "keywords")?,
+        });
+    }
+    if let Some(st) = child(b, "steam") {
+        *steam = Some(Steam {
+            portrait: png(root, &st, "portrait")?,
+            wide: png(root, &st, "wide")?,
+            hero: png(root, &st, "hero")?,
+            logo: png(root, &st, "logo")?,
+            tags: string_list(&st, "tags")?,
+            launch_options: string(&st, "launch_options")?,
         });
     }
     Ok(())
@@ -452,6 +479,18 @@ pub fn validate(plan: &Plan) -> Vec<String> {
         }
         if !l.mount.starts_with('/') {
             issues.push(format!("layer {}: mount must be an absolute path", l.name));
+        }
+    }
+    if let Some(d) = &plan.desktop {
+        for p in &d.protocols {
+            let ok = !p.is_empty()
+                && p.chars()
+                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || "+-.".contains(c));
+            if !ok {
+                issues.push(format!(
+                    "desktop.protocols: `{p}` is not a URL scheme (lowercase letters, digits, + - .)"
+                ));
+            }
         }
     }
     let scheme_ok = ["oci://", "docker://", "tar://", "dir://"]

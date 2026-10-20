@@ -618,6 +618,11 @@ sections above:
   download user is turned off inside build sandboxes for that reason.
   `$PWD` in `entry.cwd` and in bind paths lets a tool cell start where the
   user is.
+- **Desktop and Steam registration live in the launcher.** `install`
+  writes the freedesktop entry, icon, MIME types, URL schemes and one
+  desktop action per named command. `steam-add` edits Steam's binary
+  `shortcuts.vdf` and writes the grid art under the crc32-derived app id.
+  The art is PNG bytes in the manifest, declared in the build file.
 - **Pid 1 of the sandbox is a small init**, as in bubblewrap. The entry
   point is its child. The init forwards signals, reaps orphans, and waits
   for daemons such as `wineserver` to finish after the entry point exits.

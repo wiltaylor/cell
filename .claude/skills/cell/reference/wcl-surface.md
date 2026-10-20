@@ -34,6 +34,7 @@ need braces even when empty: `run "cmd" { }`.
 | `integration.dbus` | `:off`, `:session` | `:off` | Session bus, unfiltered |
 | `integration.fonts`, `integration.themes` | bool | false | Host fonts, icons and cursors under `/run/host` |
 | `integration.gpu { enable, nvidia, vaapi }` | block | enable true, nvidia `:auto` | `/dev/dri` plus NVIDIA strategy `:auto`, `:fetch`, `:host`, `:off` |
-| `integration.desktop { icon, categories, mime }` | block | — | Desktop entry data stored in the manifest |
+| `integration.desktop { icon, comment, categories, mime, protocols, keywords }` | block | — | Desktop entry data; `protocols` are URL schemes the cell handles (`x-scheme-handler/<scheme>`); `CELL_CMD=install` writes it out |
+| `integration.steam { portrait, wide, hero, logo, tags, launch_options }` | block | — | Steam library art (PNG, 600x900, 920x430, 1920x620, transparent logo) and shortcut options; `CELL_CMD=steam-add` uses it |
 
 Reserved word: `none` cannot be a symbol. The schema uses `:raw` and `:off` instead.

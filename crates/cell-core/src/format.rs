@@ -235,11 +235,36 @@ impl Default for Gpu {
     }
 }
 
+/// Desktop entry data: the icon, the menu categories, the MIME types and
+/// URL schemes the app handles. `CELL_CMD=install` writes it out.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Desktop {
     pub icon_png: Option<Vec<u8>>,
     pub categories: Vec<String>,
     pub mime: Vec<String>,
+    #[serde(default)]
+    pub comment: Option<String>,
+    /// URL schemes, registered as `x-scheme-handler/<scheme>`.
+    #[serde(default)]
+    pub protocols: Vec<String>,
+    #[serde(default)]
+    pub keywords: Vec<String>,
+}
+
+/// Steam library artwork and shortcut options. `CELL_CMD=steam-add` adds
+/// the cell as a non-Steam game with this art.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct Steam {
+    /// Library capsule, 600x900.
+    pub portrait: Option<Vec<u8>>,
+    /// Header capsule, 920x430 (or 460x215).
+    pub wide: Option<Vec<u8>>,
+    /// Library hero, 1920x620 (or 3840x1240).
+    pub hero: Option<Vec<u8>>,
+    /// Logo over the hero, transparent PNG.
+    pub logo: Option<Vec<u8>>,
+    pub tags: Vec<String>,
+    pub launch_options: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -252,6 +277,8 @@ pub struct Integration {
     pub themes: bool,
     pub gpu: Gpu,
     pub desktop: Option<Desktop>,
+    #[serde(default)]
+    pub steam: Option<Steam>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

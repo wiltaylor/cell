@@ -44,5 +44,25 @@ app "dev.wiltaylor.tuxracer" {
     input   = [:gamepad]
     fonts   = true
     gpu { enable = true nvidia = :auto }
+
+    // `CELL_CMD=install` writes a .desktop entry with this icon and makes
+    // the cell the handler for tuxracer:// links.
+    desktop {
+      icon       = "./art/icon.png"
+      comment    = "Downhill racing starring Tux"
+      categories = ["Game", "SportsGame"]
+      protocols  = ["tuxracer"]
+      keywords   = ["penguin", "ski", "racing"]
+    }
+
+    // `CELL_CMD=steam-add` adds the cell to the Steam library with this
+    // art, so it shows up in Steam and on a Steam Deck.
+    steam {
+      portrait = "./art/portrait.png"
+      wide     = "./art/wide.png"
+      hero     = "./art/hero.png"
+      logo     = "./art/logo.png"
+      tags     = ["Cell"]
+    }
   }
 }

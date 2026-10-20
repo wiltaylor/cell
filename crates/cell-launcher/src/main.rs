@@ -8,9 +8,13 @@
 //! - `CELL_CMD=info`    print host probe, grants and layers
 //! - `CELL_CMD=shell`   open a shell inside the sandbox
 //! - `CELL_CMD=verify`  check layer hashes
+//! - `CELL_CMD=install` / `uninstall`  desktop entry, icon, URL schemes
+//! - `CELL_CMD=steam-add` / `steam-remove` / `steam-list`  Steam shortcut and art
 //! - `CELL_FILE=<path>` read the payload from another file (noexec mounts)
 
+mod desktop;
 mod grants;
+mod steam;
 
 use std::path::PathBuf;
 
@@ -46,6 +50,30 @@ fn real_main() -> Result<i32> {
         "verify" => return verify(&cell),
         "manifest" => {
             println!("{:#?}", m);
+            return Ok(0);
+        }
+        "install" => {
+            desktop::install(m, &path)?;
+            return Ok(0);
+        }
+        "uninstall" => {
+            desktop::uninstall(m)?;
+            return Ok(0);
+        }
+        "steam-add" => {
+            steam::add(m, &path)?;
+            return Ok(0);
+        }
+        "steam-remove" => {
+            steam::remove(m, &path)?;
+            return Ok(0);
+        }
+        "steam-list" => {
+            steam::list()?;
+            return Ok(0);
+        }
+        "desktop-entry" => {
+            print!("{}", desktop::desktop_entry(m, &path.canonicalize()?));
             return Ok(0);
         }
         _ => {}
@@ -103,6 +131,28 @@ fn real_main() -> Result<i32> {
         }
         for line in &report.lines {
             println!("grant: {line}");
+        }
+        if let Some(d) = &m.integration.desktop {
+            println!(
+                "desktop: icon {}, categories {:?}, mime {:?}, protocols {:?}",
+                d.icon_png
+                    .as_ref()
+                    .map(|b| format!("{} bytes", b.len()))
+                    .unwrap_or("none".into()),
+                d.categories,
+                d.mime,
+                d.protocols
+            );
+        }
+        if let Some(st) = &m.integration.steam {
+            println!(
+                "steam: portrait {}, wide {}, hero {}, logo {}, tags {:?}",
+                st.portrait.is_some(),
+                st.wide.is_some(),
+                st.hero.is_some(),
+                st.logo.is_some(),
+                st.tags
+            );
         }
         println!("exec: {:?}", spec.exec);
         return Ok(0);

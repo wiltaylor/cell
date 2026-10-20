@@ -18,6 +18,11 @@ CELL_CMD=info ./app.cell                # host probe, grants, layer files, exec
 CELL_CMD=shell ./app.cell -c 'cmd'      # one command inside the sandbox
 CELL_CMD=verify ./app.cell              # layer hashes
 CELL_COMMAND=<name> ./app.cell [args]   # a named alternative command
+CELL_CMD=install ./app.cell             # .desktop entry, icon, MIME types, URL schemes
+CELL_CMD=uninstall ./app.cell
+CELL_CMD=steam-add ./app.cell           # Steam shortcut with the manifest's artwork (quit Steam first)
+CELL_CMD=steam-remove ./app.cell
+CELL_CMD=steam-list ./app.cell
 ```
 Overrides for one run: `CELL_NVIDIA=host|fetch|off|auto`, `CELL_NO_GAMESCOPE=1`,
 `CELL_LAYER_PATH=dir1:dir2` for referenced layers, `CELL_FILE=<path>` to read the

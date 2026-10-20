@@ -317,12 +317,62 @@ cell inspect app.cell              # the same from the build tool
 | `CELL_NO_GAMESCOPE` | Skip the gamescope wrapper |
 | `CELL_LAYER_PATH` | Extra directories for referenced layers, colon separated |
 | `CELL_FILE` | Read the payload from another file, for a cell on a `noexec` mount |
+| `CELL_STEAM_DIR`, `CELL_STEAM_USER` | Which Steam installation and account `steam-add` edits |
 
 A second instance of a running app starts with a throwaway overlay and
 prints a notice; both instances share the home directory. Killing the
 launcher kills the whole sandbox: pid 1 inside is a small init that gets
 `SIGKILL` when the launcher dies, forwards signals, reaps orphans and waits
 for daemons such as `wineserver` to finish after the entry point exits.
+
+## Desktop entries, URL schemes and Steam
+
+A cell can register itself with the desktop and with Steam. The art and the
+metadata come from the build file, so a published cell carries everything:
+
+```wcl
+integration {
+  desktop {
+    icon       = "./art/icon.png"
+    comment    = "Downhill racing starring Tux"
+    categories = ["Game", "SportsGame"]
+    mime       = ["application/x-tuxracer-course"]
+    protocols  = ["tuxracer"]                   // tuxracer:// links open the cell
+    keywords   = ["penguin", "ski"]
+  }
+  steam {
+    portrait = "./art/portrait.png"             // library capsule, 600x900
+    wide     = "./art/wide.png"                 // header capsule, 920x430
+    hero     = "./art/hero.png"                 // library hero, 1920x620
+    logo     = "./art/logo.png"                 // transparent logo over the hero
+    tags     = ["Cell"]
+  }
+}
+```
+
+```sh
+CELL_CMD=install ./tuxracer.cell        # .desktop entry, icon, MIME types, URL schemes
+CELL_CMD=uninstall ./tuxracer.cell
+CELL_CMD=steam-add ./tuxracer.cell      # non-Steam game with the artwork above
+CELL_CMD=steam-remove ./tuxracer.cell
+CELL_CMD=steam-list ./tuxracer.cell     # every shortcut in the Steam library
+CELL_CMD=desktop-entry ./tuxracer.cell  # print the .desktop text
+```
+
+`install` writes `~/.local/share/applications/<id>.desktop` with `Exec`
+pointing at the cell's current path, puts the icon in the hicolor theme,
+turns every `command` block into a desktop action, and makes the cell the
+default handler for its URL schemes with `xdg-mime`. A link such as
+`tuxracer://course/1` then starts the cell with the URL as its argument.
+
+`steam-add` edits `userdata/<user>/config/shortcuts.vdf` (Steam's binary
+KeyValues format), keeps a backup beside it, writes the artwork into
+`config/grid/` under the app id Steam derives for the shortcut, and prints
+the `steam://rungameid/` URL. Steam reads the file at start-up only, so quit
+Steam first; on a Steam Deck use desktop mode. The cell then appears in the
+library and in gaming mode like any other game. `CELL_STEAM_DIR` and
+`CELL_STEAM_USER` pick a Steam installation and account when there are
+several.
 
 ## State, saves and overrides
 
@@ -450,7 +500,6 @@ packaged builder, the agent skill.
 Planned:
 
 - seccomp filters and a filtered D-Bus proxy for portals
-- desktop file and icon install (`CELL_CMD=install`)
 - signing with ed25519 and a verification policy
 - fetching a missing referenced layer from a URL recorded in the manifest
 - an `aarch64` launcher build
