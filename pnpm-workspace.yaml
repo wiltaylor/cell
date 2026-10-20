@@ -1,0 +1,4 @@
+packages:
+  - apps/ui
+  - apps/hub-web
+  - apps/launcher

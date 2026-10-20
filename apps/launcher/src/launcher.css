@@ -1,0 +1,21 @@
+/* Launcher-specific layout on top of the shared theme. */
+.launcher { display: grid; grid-template-columns: 232px 1fr; height: 100vh; overflow: hidden; }
+.launcher .content { overflow: auto; padding: 24px 28px; }
+.sidebar .games { overflow: auto; flex: 1; margin-top: 6px; }
+.sidebar .games a { font-weight: 500; padding: 6px 12px; font-size: 13px; gap: 8px; }
+.sidebar .games img { width: 18px; height: 18px; border-radius: 3px; object-fit: cover; }
+.sidebar .games .dot-ico { width: 18px; height: 18px; border-radius: 3px; background: #2a475e; }
+.sidebar .foot { padding: 10px 12px; color: #5b6670; font-size: 11px; }
+.featured { position: relative; height: 320px; border-radius: var(--radius); overflow: hidden; margin-bottom: 24px; box-shadow: var(--shadow); background: #1b2838; display: flex; align-items: flex-end; padding: 28px; }
+.featured img.bg { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.featured::after { content: ""; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(15,20,25,0) 30%, rgba(15,20,25,0.9) 100%); }
+.featured .content { position: relative; z-index: 1; display: flex; align-items: flex-end; gap: 20px; width: 100%; }
+.featured .logo { max-width: 320px; max-height: 120px; filter: drop-shadow(0 6px 18px rgba(0,0,0,.7)); }
+.featured .title { font-size: 36px; font-weight: 800; color: #fff; text-shadow: 0 4px 24px rgba(0,0,0,.7); }
+.featured .actions { margin-left: auto; display: flex; gap: 10px; }
+.game-detail .hero { min-height: 360px; }
+.menu { position: relative; }
+.menu .items { position: absolute; right: 0; top: calc(100% + 6px); background: #22354d; border: 1px solid var(--line); border-radius: 4px; box-shadow: var(--shadow); min-width: 200px; z-index: 5; padding: 4px; }
+.menu .items button { display: block; width: 100%; text-align: left; background: none; border: 0; padding: 8px 10px; color: var(--text); cursor: pointer; border-radius: 3px; }
+.menu .items button:hover { background: rgba(255,255,255,0.06); }
+.dl { font-size: 12px; color: var(--muted); margin-top: 6px; }

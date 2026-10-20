@@ -1,0 +1,27 @@
+[package]
+name = "cell-launcher-app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Cell Launcher: a desktop library for .cell games with a Cell Hub browser."
+
+[lib]
+name = "cell_launcher_app_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+serde.workspace = true
+serde_json = "1"
+anyhow.workspace = true
+cell-core = { path = "../../../crates/cell-core" }
+cell-hub-api = { path = "../../../crates/cell-hub-api" }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
+tokio = { version = "1", features = ["fs", "io-util"] }
+futures-util = "0.3"
+base64 = "0.22"
+dirs = "6"

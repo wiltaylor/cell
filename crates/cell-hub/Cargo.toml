@@ -1,0 +1,31 @@
+[package]
+name = "cell-hub"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Cell Hub: a server that hosts cells for download, runs game servers from cells, and serves a web admin UI. Also a terminal console."
+
+[[bin]]
+name = "cell-hub"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+libc.workspace = true
+serde.workspace = true
+serde_json = "1"
+cell-core = { path = "../cell-core" }
+cell-hub-api = { path = "../cell-hub-api" }
+axum = { version = "0.8", features = ["ws", "macros"] }
+tokio = { version = "1", features = ["full"] }
+tower-http = { version = "0.6", features = ["cors"] }
+futures-util = "0.3"
+rust-embed = { version = "8", features = ["include-exclude"] }
+mime_guess = "2"
+clap = { version = "4", features = ["derive", "env"] }
+tar = "0.4"
+flate2.workspace = true
+rand = "0.8"
+ratatui = "0.29"
+crossterm = "0.28"
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }

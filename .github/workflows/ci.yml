@@ -23,6 +23,19 @@ jobs:
         with:
           version: 0.14.1
       - uses: Swatinem/rust-cache@v2
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Tauri and hub build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libayatana-appindicator3-dev patchelf
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --dir apps/hub-web check && pnpm --dir apps/hub-web build
+      - run: pnpm --dir apps/launcher check && pnpm --dir apps/launcher build
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
@@ -156,8 +169,20 @@ jobs:
           sed -i 's/^  version = ".*"$/  version = "'"$V"'"/' examples/cell-builder/cell.wcl
           grep -n '^version' Cargo.toml | head -1
           grep -n 'version' examples/cell-builder/cell.wcl | head -1
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Tauri and hub build deps
+        run: |
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libayatana-appindicator3-dev patchelf
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --dir apps/hub-web build && pnpm --dir apps/launcher build
       - run: just all-build
       - run: cargo build --release -p cell --target x86_64-unknown-linux-musl
+      - run: cargo build --release -p cell-hub -p cell-launcher-app
       - name: Package the build tool as a cell
         run: just example-build cell-builder
       - name: Smoke test the builder cell
@@ -172,6 +197,8 @@ jobs:
           cp examples/dist/cell-builder.cell "dist/cell-builder-$V.cell"
           cp target/x86_64-unknown-linux-musl/release/cell-launcher "dist/cell-launcher-$V-linux-x86_64"
           cp target/x86_64-unknown-linux-musl/release/cell "dist/cell-$V-linux-x86_64"
+          cp target/release/cell-hub "dist/cell-hub-$V-linux-x86_64"
+          cp target/release/cell-launcher-app "dist/cell-launcher-app-$V-linux-x86_64"
           (cd dist && sha256sum * > SHA256SUMS)
           cat dist/SHA256SUMS
       - uses: actions/upload-artifact@v7

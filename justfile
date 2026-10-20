@@ -44,3 +44,41 @@ example-info name:
 [group('example')]
 example-run name *args:
 	./examples/dist/{{name}}.cell {{args}}
+
+# Build the hub web UI (apps/hub-web/dist, embedded into cell-hub)
+[group('hub')]
+hub-web-build:
+	pnpm install
+	pnpm --dir apps/hub-web build
+
+# Build the cell-hub server with the embedded web UI
+[group('hub')]
+hub-build: hub-web-build
+	cargo build --release -p cell-hub
+
+# Run a hub on port 8787 with ./hub-data and a dev token
+[group('hub')]
+hub-serve token='devtoken': hub-build
+	CELL_HUB_TOKEN={{token}} ./target/release/cell-hub serve --listen 0.0.0.0:8787 --data ./hub-data
+
+# Open the terminal console against a local hub
+[group('hub')]
+hub-console url='http://127.0.0.1:8787' token='devtoken':
+	CELL_HUB_TOKEN={{token}} ./target/release/cell-hub console --url {{url}}
+
+# Build the desktop launcher (Tauri)
+[group('launcher')]
+launcher-app-build:
+	pnpm install
+	pnpm --dir apps/launcher build
+	cargo build --release -p cell-launcher-app
+
+# Run the desktop launcher
+[group('launcher')]
+launcher-app-run: launcher-app-build
+	./target/release/cell-launcher-app
+
+# Run the launcher with hot reload (Vite + Tauri dev)
+[group('launcher')]
+launcher-app-dev:
+	pnpm --dir apps/launcher tauri dev

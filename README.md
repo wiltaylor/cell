@@ -374,6 +374,48 @@ library and in gaming mode like any other game. `CELL_STEAM_DIR` and
 `CELL_STEAM_USER` pick a Steam installation and account when there are
 several.
 
+## Cell Launcher and Cell Hub
+
+Two more programs live in this repository and share the launcher's file
+format and look.
+
+**Cell Launcher** (`apps/launcher`, Tauri 2 with a SolidJS front end and a
+Rust backend) is a desktop library for cells. It scans a games folder,
+shows each cell with its artwork and grants, starts games and their named
+commands, registers them with the desktop or Steam, and browses a hub:
+install games with progress, upload local cells, and see the hub's game
+servers. Build and run it with `just launcher-app-run`. Settings (games
+folder, hub URL, token) live in the app config directory.
+
+**Cell Hub** (`crates/cell-hub`, axum) is the server side:
+
+- a catalog of cells with their art and referenced layers, uploaded through
+  the web UI, the launcher, or `cell-hub upload file.cell`;
+- game servers: any cell with a `command "server"` block can be hosted. Each
+  instance gets its own state directory, a live console (stdin and stdout
+  over a WebSocket), a config-file editor rooted at the game's home, and
+  tar.gz backups with restore;
+- a web admin UI embedded in the binary, in the same style as the launcher;
+- `cell-hub console` for a terminal console: servers on the left, the live
+  log on the right, a command line at the bottom, function keys for start,
+  stop, restart and backup.
+
+```sh
+just hub-serve                            # http://localhost:8787, token "devtoken"
+cell-hub upload examples/dist/openttd.cell
+cell-hub console                          # terminal console
+```
+
+Admin calls need `Authorization: Bearer <token>` when the hub was started
+with `--token` or `CELL_HUB_TOKEN`. Downloads and listings are open. The
+API is plain JSON under `/api`; `crates/cell-hub-api` holds the types.
+
+A game server is a normal cell. `examples/openttd` declares the client as
+the entry point and `command "server" { exec = ["openttd", "-D"] }` for the
+dedicated server; the hub runs that command headless with the host network,
+so the server listens on its usual port, and the OpenTTD console works
+through the hub's console.
+
 ## State, saves and overrides
 
 Writable state lives in `~/.local/share/cell/apps/<id>/`:
@@ -396,6 +438,8 @@ Requirements on the build machine:
 
 - A Rust toolchain with the `x86_64-unknown-linux-musl` target
   (`rustup target add x86_64-unknown-linux-musl`).
+- Node 20+ and pnpm for the two web front ends; webkit2gtk 4.1 and GTK 3
+  development packages for the Tauri launcher.
 - `zig`, used as the musl C compiler for the zstd and ring sources through
   `tools/musl-cc`.
 - `squashfs-tools` (`mksquashfs`) for the build tool.
@@ -418,6 +462,9 @@ The workspace has three crates:
 | `cell-core` | The file format and manifest, a random-access squashfs reader, the FUSE server, the sandbox (namespaces, mounts, grants, `pivot_root`, `exec`), host probing, NVIDIA driver fetching |
 | `cell-launcher` | The static musl binary that heads every `.cell`: 3 MiB, no dynamic dependencies |
 | `cell` | The build tool: reads `cell.wcl` through the WCL crate, pulls OCI images, runs builds in a user namespace, packs and assembles |
+| `cell-hub` | The hub server, its web UI (embedded from `apps/hub-web`) and the terminal console |
+| `cell-hub-api` | JSON types shared by the hub, the console and the launcher |
+| `apps/launcher/src-tauri` | The desktop launcher's Rust backend |
 
 The WCL dependency is pinned to a git revision of
 [wiltaylor/wcl](https://github.com/wiltaylor/wcl).
@@ -438,6 +485,7 @@ Wayland, Intel Iris Xe plus an NVIDIA RTX 4060 on driver 615.71.09:
 | `gl-tools` | 3 MiB + the same runtime | glxinfo, vulkaninfo, vkcube, eglinfo on the shared runtime file |
 | `wine-doom` | 767 MiB | Wine prefix created on first run; Minesweeper and Chocolate Doom (Freedoom) run through Wine with wined3d and DirectSound audio |
 | `cell-builder` | 12 MiB | The build tool itself; built `gl-tools` and a fresh Arch runtime with pacman from inside its own sandbox |
+| `openttd` | 4 MiB + 258 MiB runtime | OpenTTD client as the entry point; its dedicated server hosted by Cell Hub with console, config files and backups |
 
 ## How it works
 

@@ -6,3 +6,6 @@ examples/dist/
 *.cell.partial
 examples/*/build.log
 examples/wine-doom/dist/
+node_modules/
+apps/*/dist/
+hub-data/

@@ -1,0 +1,51 @@
+import <cell.wcl>
+
+// OpenTTD: the game client as the entry point, and the dedicated server as
+// the `server` command. Cell Hub runs the `server` command to host it, with
+// the console on stdin and the config and saves in the instance's home.
+app "org.openttd.openttd" {
+  name    = "OpenTTD"
+  version = "15.3"
+
+  runtime {
+    base      = "oci://archlinux:base"
+    placement = :referenced
+    packages  = [
+      "openttd", "openttd-opengfx", "openttd-opensfx",
+      "mesa", "vulkan-icd-loader", "vulkan-intel", "vulkan-radeon", "vulkan-swrast",
+      "libpulse", "pipewire", "libxkbcommon-x11", "mesa-utils",
+    ]
+  }
+
+  entry {
+    exec = ["openttd"]
+    command "server"  { exec = ["openttd", "-D"] }
+    command "glxinfo" { exec = ["glxinfo", "-B"] }
+  }
+
+  isolation {
+    network = true
+    home    = :private
+  }
+
+  integration {
+    display = [:wayland, :x11_fallback]
+    audio   = [:pipewire, :pulse]
+    input   = [:gamepad]
+    fonts   = true
+    gpu { enable = true nvidia = :auto }
+    desktop {
+      icon       = "./art/icon.png"
+      comment    = "Transport tycoon simulation"
+      categories = ["Game", "Simulation"]
+      protocols  = ["openttd"]
+    }
+    steam {
+      portrait = "./art/portrait.png"
+      wide     = "./art/wide.png"
+      hero     = "./art/hero.png"
+      logo     = "./art/logo.png"
+      tags     = ["Cell"]
+    }
+  }
+}
