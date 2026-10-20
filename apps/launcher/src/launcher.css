@@ -1,6 +1,6 @@
 /* Launcher-specific layout on top of the shared theme. */
 .launcher { display: grid; grid-template-columns: 232px 1fr; height: 100vh; overflow: hidden; }
-.launcher .content { overflow: auto; padding: 24px 28px; }
+.launcher > .content { overflow: auto; padding: 24px 28px; }
 .sidebar .games { overflow: auto; flex: 1; margin-top: 6px; }
 .sidebar .games a { font-weight: 500; padding: 6px 12px; font-size: 13px; gap: 8px; }
 .sidebar .games img { width: 18px; height: 18px; border-radius: 3px; object-fit: cover; }
