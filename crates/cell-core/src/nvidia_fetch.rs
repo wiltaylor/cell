@@ -642,7 +642,7 @@ mod tests {
 
     #[test]
     fn payload_offset_counts_lines() {
-        let dir = std::env::temp_dir().join(format!("cell-nvfetch-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("cell-nvfetch-{}-offset", std::process::id()));
         fs::create_dir_all(&dir).unwrap();
         let p = dir.join("x.run");
         fs::write(&p, b"#! /bin/sh\nskip=4\nlabel=x\nPAYLOAD").unwrap();
