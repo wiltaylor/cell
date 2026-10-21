@@ -10,8 +10,9 @@
 //! The entry point's paths are the same `/app/...` paths a Linux cell
 //! uses; `/` is the root of the layer stack. `$CELL_ROOT` in an argument,
 //! the working directory or an environment value expands to that root on
-//! the host. There is no process sandbox yet: the job object only makes
-//! sure the app's process tree dies with the launcher.
+//! the host. The process runs in an AppContainer unless the manifest or
+//! `CELL_SANDBOX=off` says otherwise; the job object makes sure the app's
+//! process tree dies with the launcher.
 
 use std::fs::{self, File};
 use std::os::windows::fs::OpenOptionsExt;
@@ -20,7 +21,9 @@ use std::process::Command;
 use std::sync::Arc;
 
 use anyhow::{bail, Context, Result};
-use cell_core::format::{sidecar_dir_for, CellFile, HomeMode, LayerRole, Manifest};
+use cell_core::format::{
+    sidecar_dir_for, BindMode, CellFile, HomeMode, LayerRole, Manifest, SandboxMode,
+};
 use cell_core::unionfs::{self, LayerSpec, Union};
 use cell_core::winfsp;
 use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
@@ -49,6 +52,20 @@ enum Tier {
 
 fn env(k: &str) -> Option<String> {
     std::env::var(k).ok().filter(|v| !v.is_empty())
+}
+
+/// `CELL_DEBUG=1`: trace the launcher's steps to stderr and to
+/// `%LOCALAPPDATA%\cell\launcher.log`, for the cases where stderr is lost.
+pub fn trace(msg: &str) {
+    if env("CELL_DEBUG").is_none() {
+        return;
+    }
+    eprintln!("cell: {msg}");
+    let log = cell_core::host::data_home().join("launcher.log");
+    if let Ok(mut f) = fs::OpenOptions::new().create(true).append(true).open(log) {
+        use std::io::Write;
+        let _ = writeln!(f, "[{}] {msg}", std::process::id());
+    }
 }
 
 fn self_path() -> Result<PathBuf> {
@@ -131,6 +148,14 @@ impl Drop for Job {
     }
 }
 
+fn choose_sandbox(m: &Manifest) -> SandboxMode {
+    match env("CELL_SANDBOX").as_deref() {
+        Some("off") => SandboxMode::Off,
+        Some("appcontainer") => SandboxMode::AppContainer,
+        _ => m.isolation.sandbox,
+    }
+}
+
 fn choose_tier() -> Tier {
     match env("CELL_TIER").as_deref() {
         Some("extract") => Tier::Extract,
@@ -160,6 +185,34 @@ fn expand(s: &str, root: &Path, pwd: &Path) -> String {
     s.replace("$CELL_ROOT", &root.to_string_lossy())
         .replace("${CELL_ROOT}", &root.to_string_lossy())
         .replace("$PWD", &pwd.to_string_lossy())
+}
+
+/// `CELL_CMD=setup`: let sandboxed cells use WinFsp volumes. Elevates
+/// through UAC when needed; the elevated copy runs with `--cell-setup`.
+fn setup(self_elevated: bool) -> Result<i32> {
+    let result = if crate::setup::is_elevated() {
+        crate::setup::apply().map(|_| {
+            println!(
+                "cell: WinFsp volumes now admit app packages; sandboxed cells use the mounted tier from their next start"
+            );
+        })
+    } else {
+        println!("cell: setup needs administrator rights; asking for elevation");
+        crate::setup::elevate_and_apply().map(|_| {
+            println!("cell: the elevated setup window reports the result");
+        })
+    };
+    if self_elevated {
+        // Our own console window: keep it until the user has read it.
+        match &result {
+            Ok(()) => {}
+            Err(e) => eprintln!("cell: setup failed: {e:#}"),
+        }
+        println!("Press Enter to close this window.");
+        let mut line = String::new();
+        let _ = std::io::stdin().read_line(&mut line);
+    }
+    result.map(|_| 0)
 }
 
 /// Extract every layer into `root` once; a stamp of the layer hashes says
@@ -226,7 +279,7 @@ fn winfsp_tier(
     let union = Union::new(api, layers, upper)?;
     let mount_point = cell_core::host::data_home().join("mnt").join(mount_name);
     let _ = &state.base;
-    unionfs::mount(union, &mount_point, env("CELL_DEBUG").is_some())
+    unionfs::mount(union, &mount_point, env("CELL_DEBUG_WINFSP").is_some())
 }
 
 fn home_env(m: &Manifest, state: &State) -> Result<Vec<(String, String)>> {
@@ -269,9 +322,16 @@ pub fn real_main() -> Result<i32> {
             m.app.os
         );
     }
-    let cmd = env("CELL_CMD").unwrap_or_default();
+    let args_in: Vec<String> = std::env::args().skip(1).collect();
+    let self_elevated = args_in.len() == 1 && args_in[0] == crate::setup::SETUP_ARG;
+    let cmd = if self_elevated {
+        "setup".to_string()
+    } else {
+        env("CELL_CMD").unwrap_or_default()
+    };
     match cmd.as_str() {
         "verify" => return crate::common::verify(&cell),
+        "setup" => return setup(self_elevated),
         "manifest" => {
             println!("{:#?}", m);
             return Ok(0);
@@ -285,6 +345,10 @@ pub fn real_main() -> Result<i32> {
 
     let state = state_dirs(m, &path)?;
     let tier = choose_tier();
+    let sandbox = choose_sandbox(m);
+    trace(&format!(
+        "start: tier {tier:?}, sandbox {sandbox:?}, cmd `{cmd}`"
+    ));
     let exec = if cmd == "shell" {
         vec![env("COMSPEC").unwrap_or_else(|| "cmd.exe".into())]
     } else {
@@ -321,10 +385,27 @@ pub fn real_main() -> Result<i32> {
             );
         }
         println!("home: {:?}", m.isolation.home);
-        if m.isolation.network {
-            println!("network: host (no process sandbox on Windows yet)");
-        } else {
-            println!("network: manifest says none, but Windows has no process sandbox yet; the app has host network");
+        match sandbox {
+            SandboxMode::AppContainer => {
+                println!(
+                    "sandbox: AppContainer `{}`, network {}",
+                    crate::appcontainer::profile_name(&m.app.id),
+                    if m.isolation.network {
+                        "granted"
+                    } else {
+                        "none"
+                    }
+                );
+                for b in &m.isolation.binds {
+                    println!(
+                        "grant: {:?} {} (guest path {} is not used on Windows)",
+                        b.mode, b.host, b.guest
+                    );
+                }
+            }
+            SandboxMode::Off => {
+                println!("sandbox: off; the app runs as the user with host network")
+            }
         }
         println!("exec: {:?}", exec);
         return Ok(0);
@@ -334,6 +415,7 @@ pub fn real_main() -> Result<i32> {
     // SAFETY: documented use of the API.
     unsafe { SetConsoleCtrlHandler(None, 1) };
     let _job = Job::new()?;
+    trace("job object ready");
 
     let lock = instance_lock(&state);
     let (upper, mount_name) = if lock.is_some() {
@@ -350,17 +432,78 @@ pub fn real_main() -> Result<i32> {
         (scratch, format!("{}-{}", m.app.id, std::process::id()))
     };
 
+    // The container needs ACEs on what it must reach: its state, the
+    // mount point's parent, and granted host paths. Grants come before
+    // the mount so the mount point directory inherits them.
+    let container = match sandbox {
+        SandboxMode::AppContainer => {
+            let sid = crate::appcontainer::profile_sid(&m.app.id, &m.app.name)?;
+            trace("appcontainer profile ready");
+            crate::appcontainer::grant(&state.base, &sid, true)
+                .with_context(|| format!("grant the sandbox access to {}", state.base.display()))?;
+            if lock.is_none() {
+                fs::create_dir_all(&upper)?;
+                crate::appcontainer::grant(&upper, &sid, true)?;
+            }
+            let mnt = cell_core::host::data_home().join("mnt");
+            fs::create_dir_all(&mnt)?;
+            crate::appcontainer::grant(&mnt, &sid, false)?;
+            for b in &m.isolation.binds {
+                let host = PathBuf::from(expand(
+                    &b.host,
+                    &state.base,
+                    &std::env::current_dir().unwrap_or_default(),
+                ));
+                if !host.exists() {
+                    if b.optional {
+                        continue;
+                    }
+                    bail!("bind {}: {} does not exist", b.guest, host.display());
+                }
+                crate::appcontainer::grant(&host, &sid, b.mode != BindMode::Ro)
+                    .with_context(|| format!("grant the sandbox access to {}", host.display()))?;
+            }
+            trace("grants applied");
+            Some((sid, crate::appcontainer::capabilities(m.isolation.network)?))
+        }
+        SandboxMode::Off => None,
+    };
+
     let mut mounted = None;
     let root = match tier {
         Tier::WinFsp => {
             let mnt = winfsp_tier(&cell, &state, &upper, &mount_name)?;
             let root = mnt.mount_point.clone();
-            mounted = Some(mnt);
-            root
+            trace(&format!(
+                "mounted {} at {}",
+                mnt.volume_name,
+                root.display()
+            ));
+            if let Some(sddl) = crate::setup::device_sddl(&mnt.volume_name) {
+                trace(&format!("volume device descriptor: {sddl}"));
+            }
+            // An AppContainer cannot open a WinFsp volume until the one-time
+            // setup has added app packages to the device class security.
+            // Until then the sandbox wins over laziness: extract instead.
+            if container.is_some()
+                && crate::setup::device_allows_app_packages(&mnt.volume_name) == Some(false)
+            {
+                eprintln!(
+                    "cell: the sandbox cannot reach WinFsp volumes on this host yet; running from an extracted copy. \
+                     Run once as administrator to fix: set CELL_CMD=setup && \"{}\"",
+                    path.display()
+                );
+                drop(mnt);
+                extract_tier(&cell, &state)?
+            } else {
+                mounted = Some(mnt);
+                root
+            }
         }
         Tier::Extract => extract_tier(&cell, &state)?,
     };
 
+    trace(&format!("root ready at {}", root.display()));
     let pwd = std::env::current_dir().unwrap_or_else(|_| root.clone());
     let program = if exec[0].starts_with('/') {
         host_path(&root, &exec[0])
@@ -381,20 +524,37 @@ pub fn real_main() -> Result<i32> {
             .unwrap_or_else(|| root.clone()),
     };
 
-    let mut c = Command::new(&program);
-    c.args(&args).current_dir(&cwd);
-    c.env("CELL_ROOT", &root);
-    c.env("CELL_APP_ID", &m.app.id);
-    for (k, v) in home_env(m, &state)? {
-        c.env(k, v);
+    let mut envs: Vec<(String, String)> = vec![
+        ("CELL_ROOT".into(), root.to_string_lossy().into_owned()),
+        ("CELL_APP_ID".into(), m.app.id.clone()),
+    ];
+    if let Some(mnt) = &mounted {
+        envs.push(("CELL_VOLUME".into(), mnt.volume_name.clone()));
     }
+    envs.extend(home_env(m, &state)?);
     for (k, v) in &m.entry.env {
-        c.env(k, expand(v, &root, &pwd));
+        envs.push((k.clone(), expand(v, &root, &pwd)));
     }
-    let status = c
-        .status()
-        .with_context(|| format!("run {}", program.display()))?;
-    let code = status.code().unwrap_or(1);
+    trace(&format!("spawning {} {:?}", program.display(), args));
+    let code = match &container {
+        Some((sid, caps)) => {
+            envs.push(("CELL_SANDBOX".into(), "appcontainer".into()));
+            crate::appcontainer::run(&program, &args, &cwd, &envs, sid, caps)?
+        }
+        None => {
+            let mut c = Command::new(&program);
+            c.args(&args).current_dir(&cwd);
+            for (k, v) in &envs {
+                c.env(k, v);
+            }
+            c.env("CELL_SANDBOX", "off");
+            let status = c
+                .status()
+                .with_context(|| format!("run {}", program.display()))?;
+            status.code().unwrap_or(1)
+        }
+    };
+    trace(&format!("child exited with {code}"));
     drop(mounted);
     drop(lock);
     Ok(code)

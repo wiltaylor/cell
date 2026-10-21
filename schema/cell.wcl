@@ -15,6 +15,7 @@ symbol_set Placement   { embedded sidecar referenced }
 symbol_set Compression { zstd raw }
 symbol_set HomeMode    { private portable host }
 symbol_set PidMode     { private host }
+symbol_set Sandbox     { appcontainer off }
 symbol_set Display     { wayland x11 x11_fallback }
 symbol_set Audio       { pipewire pulse alsa }
 symbol_set Input       { gamepad uinput }
@@ -136,6 +137,8 @@ type Isolation {
   @doc("private: per-app home in XDG_DATA_HOME; portable: beside the file; host: the real home")
   @default(:private) home: HomeMode?
   @default(:private) pid: PidMode?
+  @doc("Windows only: run the app in an AppContainer, where network = false means no network and bind blocks become access grants on the host path; :off runs it as the user with no sandbox")
+  @default(:appcontainer) sandbox: Sandbox?
   @doc("Share /dev/shm with the host")
   @default(false) shm: bool?
   @children("bind") binds: list<Bind>

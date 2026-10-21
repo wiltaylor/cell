@@ -714,24 +714,52 @@ launcher, which is the Linux init guarantee. Ctrl-C is left to the app.
 `LOCALAPPDATA`, `TEMP` and `TMP` to a per-app home. That is an environment
 convention, not an enforcement.
 
-### 16.4 Not done, in order
+### 16.4 The sandbox (2026-10-21)
 
-1. **Sandbox.** AppContainer: `CreateAppContainerProfile` needs no admin;
-   `network = false` becomes "no `internetClient` capability" and a `bind`
-   becomes an ACL for the container SID. Many desktop apps break inside an
-   AppContainer, so it must be a manifest switch. Until then `network`,
-   `bind` and the grants are accepted and ignored, and `CELL_CMD=info`
-   says so.
-2. **Registry.** `RegLoadAppKey` for the layer hive and the upper hive,
+`cell-launcher/src/appcontainer.rs`. `CreateAppContainerProfile` needs
+no administrator; the profile name is `cell.<id>`. The launcher adds
+inheritable ACEs for the container SID on the app's state directory, on
+the mount point's parent and on every `bind` host path, builds the
+capability list from `network`, and spawns with
+`PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES`. Three things learned the
+hard way:
+
+- An empty capability list must be a null pointer, or `CreateProcessW`
+  fails with `ERROR_INVALID_PARAMETER`.
+- A handle the child inherits is access-checked against the container
+  token, so the terminal's or an agent's stdio handles never arrive. The
+  launcher creates its own pipes with a descriptor that names
+  `ALL APPLICATION PACKAGES`, hands them to the child and pumps them to
+  its own stdout and stderr.
+- WinFsp creates each volume device with
+  `D:P(A;;GA;;;SY)(A;;GA;;;BA)(A;;GRGX;;;WD)`, which no AppContainer can
+  pass, so every open died in the I/O manager before the file system saw
+  it. `IoCreateDeviceSecure` lets device class security in the registry
+  override that default. `CELL_CMD=setup` (`setup.rs`) writes
+  `D:P(A;;GA;;;SY)(A;;GA;;;BA)(A;;GRGX;;;WD)(A;;GA;;;AC)` under
+  `HKLM\SYSTEM\CurrentControlSet\Control\Class\{b48171c3-dd50-4852-83a3-344c50d93b17}\Properties`
+  through `SeRestorePrivilege`, after a UAC prompt; the next mount creates
+  a device that app packages can open. The launcher reads the device
+  descriptor through a volume handle after mounting and, when app
+  packages are missing, runs the sandboxed app from the extract tier
+  with a notice. Read and execute is not enough for the device: writes
+  need full access there too.
+
+The manifest field is `isolation { sandbox = :appcontainer | :off }`,
+default on; `CELL_SANDBOX=off` overrides per run. Linux ignores it.
+
+### 16.5 Not done, in order
+
+1. **Registry.** `RegLoadAppKey` for the layer hive and the upper hive,
    plus registry hooks to merge them. Captured at build time from a diff.
-3. **Build-time capture.** `run` steps need a Windows build host: run the
+2. **Build-time capture.** `run` steps need a Windows build host: run the
    installer under the launcher with a scratch upper and freeze the upper
    into the app layer. This is the ThinApp and Cameyo capture, declarative.
-4. Desktop and Steam integration, the PE icon resource, Authenticode
+3. Desktop and Steam integration, the PE icon resource, Authenticode
    signing (unsigned EXEs with a large overlay trip SmartScreen), 32-bit
    and ARM64 launchers.
 
-### 16.5 Licence note
+### 16.6 Licence note
 
 WinFsp is GPLv3 with a FLOSS exception that allows linking the DLL and
 shipping the installer from software under a FLOSS licence, with a notice

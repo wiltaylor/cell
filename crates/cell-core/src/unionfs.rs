@@ -1563,6 +1563,8 @@ pub struct Mounted {
     api: Arc<Api>,
     _union: Arc<Union>,
     pub mount_point: PathBuf,
+    /// The kernel name of the volume, `\Device\Volume{...}`.
+    pub volume_name: String,
 }
 
 unsafe impl Send for Mounted {}
@@ -1648,10 +1650,13 @@ pub fn mount(union: Arc<Union>, mount_point: &Path, debug: bool) -> Result<Mount
         bail!("cannot start the file system: 0x{:08x}", st as u32);
     }
     let _ = ERROR_FILE_NOT_FOUND;
+    // SAFETY: `fs` is live.
+    let volume_name = unsafe { fsp::volume_name(fs) };
     Ok(Mounted {
         fs,
         api,
         _union: union,
         mount_point: mount_point.to_path_buf(),
+        volume_name,
     })
 }

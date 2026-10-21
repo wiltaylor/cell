@@ -14,12 +14,16 @@
 //! - `CELL_CMD=steam-add` / `steam-remove` / `steam-list`  Steam shortcut and art (Linux)
 //! - `CELL_FILE=<path>` read the payload from another file (noexec mounts)
 
+#[cfg(windows)]
+mod appcontainer;
 #[cfg(target_os = "linux")]
 mod desktop;
 #[cfg(target_os = "linux")]
 mod grants;
 #[cfg(target_os = "linux")]
 mod linux;
+#[cfg(windows)]
+mod setup;
 #[cfg(target_os = "linux")]
 mod steam;
 #[cfg(windows)]

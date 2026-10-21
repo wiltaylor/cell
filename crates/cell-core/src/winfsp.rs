@@ -291,6 +291,17 @@ pub unsafe fn user_context(fs: *mut FileSystem) -> *mut c_void {
     *((fs as *mut u8).add(8) as *mut *mut c_void)
 }
 
+/// `FileSystem->VolumeName`, the `\Device\Volume{...}` name of the
+/// mounted volume (a wide string at offset 16, up to 256 characters).
+pub unsafe fn volume_name(fs: *mut FileSystem) -> String {
+    let p = (fs as *const u8).add(16) as *const u16;
+    let mut n = 0;
+    while n < 256 && *p.add(n) != 0 {
+        n += 1;
+    }
+    String::from_utf16_lossy(std::slice::from_raw_parts(p, n))
+}
+
 pub unsafe fn set_user_context(fs: *mut FileSystem, ctx: *mut c_void) {
     *((fs as *mut u8).add(8) as *mut *mut c_void) = ctx;
 }

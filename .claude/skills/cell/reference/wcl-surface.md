@@ -28,6 +28,7 @@ need braces even when empty: `run "cmd" { }`.
 | `isolation.home` | `:private`, `:portable`, `:host` | `:private` | Private home in `~/.local/share/cell/apps/<id>/home`, beside the file in `<name>.cell.d/`, or the real home |
 | `isolation.pid` | `:private`, `:host` | `:private` | Pid namespace |
 | `isolation.shm` | bool | false | Share `/dev/shm` |
+| `isolation.sandbox` | `:appcontainer`, `:off` | `:appcontainer` | Windows only: run the app in an AppContainer (network and binds become capabilities and ACL grants) or as the user. `CELL_SANDBOX=off` overrides per run. The mounted tier needs `CELL_CMD=setup` once as administrator |
 | `isolation.bind "<ro|rw|dev>" { host, guest, optional }` | block | — | Extra bind; `$PWD` expands in both paths; `optional` defaults to true |
 | `integration.display` | list of `:wayland`, `:x11`, `:x11_fallback` | — | Display sockets. `:x11_fallback` needs `:wayland` in the list |
 | `integration.audio` | list of `:pipewire`, `:pulse`, `:alsa` | — | Audio sockets or `/dev/snd` |

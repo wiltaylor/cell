@@ -14,9 +14,11 @@ use windows_sys::Win32::Storage::FileSystem::{
     CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_SHARE_READ, OPEN_EXISTING,
 };
 use windows_sys::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW};
+use windows_sys::Win32::Security::{GetTokenInformation, TokenIsAppContainer, TOKEN_QUERY};
 use windows_sys::Win32::System::Memory::{
     CreateFileMappingW, MapViewOfFile, UnmapViewOfFile, FILE_MAP_READ, PAGE_READONLY,
 };
+use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 
 struct T {
     failed: u32,
@@ -265,6 +267,35 @@ fn main() {
         saved.is_ok() && appdata.starts_with(&home),
         || format!("{saved:?} home={home} appdata={appdata}"),
     );
+
+    // 16. The sandbox. CELL_SANDBOX says what the launcher did.
+    let in_container = unsafe {
+        let mut tok = std::ptr::null_mut();
+        let mut v: u32 = 0;
+        let mut n: u32 = 0;
+        OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut tok) != 0
+            && GetTokenInformation(tok, TokenIsAppContainer, &mut v as *mut _ as *mut _, 4, &mut n) != 0
+            && v != 0
+    };
+    let want_container = std::env::var("CELL_SANDBOX").as_deref() == Ok("appcontainer");
+    println!("CELL_SANDBOX: {}", std::env::var("CELL_SANDBOX").unwrap_or_default());
+    t.check(
+        "token is an AppContainer when the sandbox is on",
+        in_container == want_container,
+        || format!("in_container={in_container} want={want_container}"),
+    );
+
+    // 17. Network: the manifest says none, so a connect must fail at once
+    // inside the container. Outside it the connect reaches the host stack.
+    let addr: std::net::SocketAddr = "1.1.1.1:53".parse().unwrap();
+    let start = std::time::Instant::now();
+    let r = std::net::TcpStream::connect_timeout(&addr, std::time::Duration::from_secs(3));
+    let blocked = r.is_err() && start.elapsed() < std::time::Duration::from_millis(500);
+    if want_container {
+        t.check("network blocked in the container", blocked, || format!("{r:?} after {:?}", start.elapsed()));
+    } else {
+        println!("INFO network outside the sandbox: {:?} after {:?}", r.is_ok(), start.elapsed());
+    }
 
     println!("{} passed, {} failed", t.passed, t.failed);
     std::process::exit(if t.failed == 0 { 0 } else { 1 });

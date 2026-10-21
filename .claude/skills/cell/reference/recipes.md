@@ -194,9 +194,13 @@ app "dev.example.game" {
 `cell build cell.wcl -o game.cell` writes `game.cell.exe`. On a Windows host with WinFsp
 installed it mounts the layers at `%LOCALAPPDATA%\cell\mnt\<id>` and runs the entry;
 without WinFsp it extracts them once. `home = :private` points `USERPROFILE`, `APPDATA`,
-`LOCALAPPDATA` and `TEMP` at a per-app home. Nothing sandboxes the process yet, so
-`network` and `bind` have no effect on Windows. The build tool rejects file names
-Windows cannot hold and names that differ only in case.
+`LOCALAPPDATA` and `TEMP` at a per-app home. The app runs in an AppContainer:
+`network = false` blocks every socket, and a `bind` grants the container access to the
+host path. Sandboxed apps can use the mounted tier only after `CELL_CMD=setup` ran once
+as administrator; before that the launcher runs them from an extracted copy and says
+so. `sandbox = :off` in the `isolation` block turns the container off for apps that
+cannot live in one. The build tool rejects file names Windows cannot hold and names
+that differ only in case.
 
 ## Sharing one runtime between many games
 

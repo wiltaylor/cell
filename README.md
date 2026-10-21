@@ -439,12 +439,34 @@ portable apps already are; a WinFsp volume cannot overlay `C:\`.
 land there; `:host` leaves them alone. `CELL_CMD=info`, `verify`,
 `manifest` and `shell` work as on Linux.
 
+**The sandbox.** The app runs in an AppContainer unless the manifest says
+`isolation { sandbox = :off }` or the user sets `CELL_SANDBOX=off`. That
+is the same boundary Windows uses for Store apps and for Win32 app
+isolation: a low-integrity token with its own SID, which can open nothing
+the launcher did not grant. The grants map like this:
+
+| Manifest | In the container |
+| --- | --- |
+| `network = false` | No network capability: every socket call fails at once |
+| `network = true` | The `internetClient`, `internetClientServer` and `privateNetworkClientServer` capabilities |
+| `bind "ro" { host }` | A read ACE for the container on the host path; `guest` has no meaning without a mount namespace |
+| `bind "rw" { host }` | A full-access ACE on the host path |
+| `home = :private` | The per-app home gets an ACE; the real profile stays invisible |
+
+One host step is needed before a sandboxed app can use the mounted tier.
+WinFsp creates every volume device with a descriptor that admits Everyone
+but no app package, and an AppContainer must pass a second check that
+only its own SIDs can satisfy. `CELL_CMD=setup`, run once as
+administrator (it asks for elevation), adds app packages to WinFsp's
+device class security in the registry; every later mount picks it up
+without a reboot. Until then the launcher notices, says so, and runs the
+sandboxed app from an extracted copy instead, so the boundary never
+silently drops.
+
 What a Windows cell does not have yet, in order of likely arrival:
 
-- **A process sandbox.** Hooks or WinFsp give a file system, not a
-  boundary. `network = false`, `bind` blocks and the grants do nothing; the
-  app has whatever the user has. AppContainer is the planned answer.
-- **A virtual registry.** The app reads and writes the real `HKCU`.
+- **A virtual registry.** The app reads and writes the real `HKCU`, and
+  inside the container only the keys the container may reach.
 - **`run` build steps.** The build tool runs on Linux, so a Windows
   installer cannot execute during a build; `copy` the installed files.
 - Desktop and Steam integration (`CELL_CMD=install`, `steam-add`), the PE
@@ -546,7 +568,7 @@ WinFsp 2.x installed:
 
 | Example | Size | Result |
 | --- | --- | --- |
-| `win-test` | 12 MiB | All 15 checks pass through the WinFsp union volume and again with `CELL_TIER=extract`: lower reads, case-insensitive lookup, a 16 MiB pattern read and memory-mapped, copy-up on append, whiteout on delete, mkdir and rename, DLL loading from the layer, a `:raw` data layer at `/assets`, a child `cmd` reading the layer, a writable private home. The mount point is gone after exit |
+| `win-test` | 12 MiB | All 17 checks pass inside the AppContainer through the WinFsp union volume, again with `CELL_TIER=extract`, and with `CELL_SANDBOX=off`: lower reads, case-insensitive lookup, a 16 MiB pattern read and memory-mapped, copy-up on append, whiteout on delete, mkdir and rename, DLL loading from the layer, a `:raw` data layer at `/assets`, a child `cmd` reading the layer, a writable private home, an AppContainer token, and a blocked network. Without the setup step the launcher falls back to the extracted copy and still passes. The mount point is gone after exit |
 | `wine-doom` (`cell-windows.wcl`) | 63 MiB | Chocolate Doom's 32-bit Windows build runs Freedoom from the mounted volume, launched from the Run dialog; the mount is also visible to other sessions on the machine |
 
 ## How it works
@@ -581,8 +603,9 @@ subordinate ids, or with one mapped id when running inside a cell.
 ## Host requirements
 
 Windows: Windows 10 or 11 x64, and [WinFsp](https://winfsp.dev) for the
-mounted tier (one installer, no reboot). Without it the launcher extracts
-the layers once.
+mounted tier (one installer, no reboot), plus `CELL_CMD=setup` once as
+administrator so sandboxed apps can use that tier. Without either the
+launcher extracts the layers once.
 
 Linux:
 
@@ -614,13 +637,14 @@ sidecar and referenced placement, named commands, instance locking, the
 packaged builder, the agent skill.
 
 Working on Windows: the `.cell.exe` format, the WinFsp union mount, the
-extract fallback, `$CELL_ROOT`, the private home, the job object, the
-Windows name checks in the build tool.
+extract fallback, the AppContainer sandbox with `network` and `bind`
+grants, `CELL_CMD=setup`, `$CELL_ROOT`, the private home, the job object,
+the Windows name checks in the build tool.
 
 Planned:
 
-- Windows: an AppContainer sandbox for `network` and `bind`, a virtual
-  registry, desktop and Steam integration, the PE icon, signing
+- Windows: a virtual registry, desktop and Steam integration, the PE
+  icon, signing
 - seccomp filters and a filtered D-Bus proxy for portals
 - signing with ed25519 and a verification policy
 - fetching a missing referenced layer from a URL recorded in the manifest

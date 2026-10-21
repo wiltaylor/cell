@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{anyhow, bail, Context, Result};
 use cell_core::format::{
     Audio, Bind, BindMode, Dbus, Desktop, Display, Entry, Gpu, HomeMode, Input, Integration,
-    Isolation, NamedCommand, NvidiaMode, PidMode, Steam,
+    Isolation, NamedCommand, NvidiaMode, PidMode, SandboxMode, Steam,
 };
 use wcl_lang::{disk_loader, Block, Document, Environment, Registry, Value};
 
@@ -338,6 +338,13 @@ fn read_isolation(b: &Block, i: &mut Isolation) -> Result<()> {
     }
     if let Some(s) = boolean(b, "shm")? {
         i.shm = s;
+    }
+    if let Some(s) = symbol(b, "sandbox")? {
+        i.sandbox = match s.as_str() {
+            "appcontainer" => SandboxMode::AppContainer,
+            "off" => SandboxMode::Off,
+            o => bail!("sandbox: unknown mode {o}"),
+        };
     }
     for bind in children(b, "bind") {
         let mode = match label(&bind)?.as_str() {

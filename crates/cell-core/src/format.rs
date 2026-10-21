@@ -175,6 +175,17 @@ pub struct Bind {
     pub optional: bool,
 }
 
+/// The Windows process sandbox. Linux ignores it: namespaces always apply.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub enum SandboxMode {
+    /// An AppContainer: no network without the grant, no host files
+    /// except the granted paths, a low-integrity token.
+    #[default]
+    AppContainer,
+    /// The user's own token, nothing enforced.
+    Off,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Isolation {
     pub network: bool,
@@ -182,6 +193,8 @@ pub struct Isolation {
     pub pid: PidMode,
     pub shm: bool,
     pub binds: Vec<Bind>,
+    #[serde(default)]
+    pub sandbox: SandboxMode,
 }
 
 impl Default for Isolation {
@@ -192,6 +205,7 @@ impl Default for Isolation {
             pid: PidMode::Private,
             shm: false,
             binds: Vec::new(),
+            sandbox: SandboxMode::AppContainer,
         }
     }
 }
