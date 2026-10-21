@@ -693,9 +693,9 @@ release: true
 `X.Y.Z-alpha` pre-release. The version comes from the last `v*` tag, bumped
 by the conventional-commit subjects since it (`feat:` minor, `fix:` and the
 other types patch, `!` or `BREAKING CHANGE` minor while the major is 0). The
-workflow builds the launcher, the tool and `cell-builder.cell` on a GitHub
-runner, smoke-tests the builder cell, tags the commit, and attaches the
-artifacts with a `SHA256SUMS` file.
+workflow builds the Linux launcher, the Windows launcher, the tool and
+`cell-builder.cell` on a GitHub runner, smoke-tests the builder cell, tags
+the commit, and attaches the artifacts with a `SHA256SUMS` file.
 
 ## License
 
