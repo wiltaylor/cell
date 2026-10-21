@@ -9,7 +9,6 @@
 
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
-use std::os::unix::fs::FileExt;
 use std::path::Path;
 
 use anyhow::{bail, Context, Result};
@@ -112,6 +111,21 @@ pub struct AppInfo {
     pub name: String,
     pub version: String,
     pub arch: String,
+    /// `linux` or `windows`. Decides which launcher heads the file and
+    /// how the entry point's paths are read. Older manifests have no
+    /// field, and they are Linux cells.
+    #[serde(default = "default_os")]
+    pub os: String,
+}
+
+fn default_os() -> String {
+    "linux".to_string()
+}
+
+impl AppInfo {
+    pub fn is_windows(&self) -> bool {
+        self.os == "windows"
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -303,6 +317,18 @@ impl Manifest {
     }
 }
 
+/// The sidecar directory of a cell at `path`: `<name>.cell.d`, with a
+/// trailing `.exe` removed first.
+pub fn sidecar_dir_for(path: &Path) -> std::path::PathBuf {
+    let base = match path.extension().and_then(|e| e.to_str()) {
+        Some(e) if e.eq_ignore_ascii_case("exe") => path.with_extension(""),
+        _ => path.to_path_buf(),
+    };
+    let mut s = base.as_os_str().to_owned();
+    s.push(".d");
+    std::path::PathBuf::from(s)
+}
+
 /// A `.cell` file opened for reading: the trailer and the manifest.
 pub struct CellFile {
     pub path: std::path::PathBuf,
@@ -319,7 +345,7 @@ impl CellFile {
             bail!("{} is too small to be a .cell file", path.display());
         }
         let mut tb = [0u8; 64];
-        file.read_exact_at(&mut tb, len - TRAILER_LEN)?;
+        crate::pread::read_exact_at(&file, &mut tb, len - TRAILER_LEN)?;
         let trailer = Trailer::from_bytes(&tb)?;
         if trailer.version != FORMAT_VERSION {
             bail!(
@@ -372,7 +398,8 @@ impl CellFile {
     pub fn referenced_search_dirs(&self) -> Vec<std::path::PathBuf> {
         let mut dirs = Vec::new();
         if let Ok(v) = std::env::var("CELL_LAYER_PATH") {
-            for d in v.split(':').filter(|d| !d.is_empty()) {
+            let sep = if cfg!(windows) { ';' } else { ':' };
+            for d in v.split(sep).filter(|d| !d.is_empty()) {
                 dirs.push(std::path::PathBuf::from(d));
             }
         }
@@ -385,10 +412,10 @@ impl CellFile {
         dirs
     }
 
-    /// `<name>.cell.d` beside the file.
+    /// `<name>.cell.d` beside the file. A Windows cell is `<name>.cell.exe`
+    /// and its sidecar directory drops the `.exe`, so both platforms use
+    /// `<name>.cell.d`.
     pub fn sidecar_dir(&self) -> std::path::PathBuf {
-        let mut s = self.path.as_os_str().to_owned();
-        s.push(".d");
-        std::path::PathBuf::from(s)
+        sidecar_dir_for(&self.path)
     }
 }

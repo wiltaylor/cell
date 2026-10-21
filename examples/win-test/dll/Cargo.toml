@@ -1,0 +1,14 @@
+# A DLL the test program loads from the layer, to prove the Windows loader
+# can map executables from the union volume.
+[package]
+name = "cellanswer"
+version = "0.1.0"
+edition = "2021"
+
+[workspace]
+
+[lib]
+crate-type = ["cdylib"]
+
+[profile.release]
+strip = true

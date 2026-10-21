@@ -33,6 +33,26 @@ jobs:
           file target/x86_64-unknown-linux-musl/release/cell-launcher | grep -q 'static'
           ! ldd target/x86_64-unknown-linux-musl/release/cell-launcher 2>/dev/null | grep -q '=>'
 
+  # The Windows launcher cross-compiles from Linux with mingw-w64. It links
+  # nothing from WinFsp at build time (the DLL is loaded at run time), so
+  # this job needs no Windows host.
+  windows:
+    name: Windows launcher (cross)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-gnu
+          components: clippy
+      - run: sudo apt-get update && sudo apt-get install -y gcc-mingw-w64-x86-64
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: windows-gnu
+      - run: cargo clippy -p cell-launcher --target x86_64-pc-windows-gnu -- -D warnings
+      - run: cargo build --release -p cell-launcher --target x86_64-pc-windows-gnu
+      - run: file target/x86_64-pc-windows-gnu/release/cell-launcher.exe | grep -q 'PE32+'
+
   # ── Version ───────────────────────────────────────────────────────────────
   # Trailer-gated: a release only happens when HEAD carries a publish trailer.
   #   pre-release: true   → X.Y.Z-alpha, marked as a GitHub pre-release

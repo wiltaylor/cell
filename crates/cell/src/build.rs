@@ -271,6 +271,9 @@ fn package_command(base: &Path, plan: &Plan) -> Option<String> {
 pub fn run_build(plan: &Plan, opts: &Options) -> Result<i32> {
     let work = cell_core::host::cache_home().join("build").join(&plan.id);
     fs::create_dir_all(&work)?;
+    if plan.is_windows() {
+        return run_build_windows(plan, opts, &work);
+    }
     let (base, base_id) = base_rootfs(plan, opts.no_cache)?;
 
     // Runtime layer.
@@ -373,7 +376,52 @@ pub fn run_build(plan: &Plan, opts: &Options) -> Result<i32> {
     }
 
     // Assemble.
-    assemble(plan, opts, &runtime_sqfs, &app_sqfs, &data_files)?;
+    assemble(plan, opts, Some(&runtime_sqfs), &app_sqfs, &data_files)?;
+    Ok(0)
+}
+
+/// A Windows cell: no package manager and no sandbox. The runtime layer,
+/// when there is one, is a `dir://` or `tar://` tree packed as is; the app
+/// layer is the copy steps; data layers pack like on Linux.
+fn run_build_windows(plan: &Plan, opts: &Options, work: &Path) -> Result<i32> {
+    let runtime_sqfs = if plan.runtime.base.is_empty() {
+        None
+    } else {
+        let (base, base_id) = base_rootfs(plan, opts.no_cache)?;
+        let rt_key = hash_str(&[&base_id, &plan.arch, "windows"]);
+        let runtimes = cell_core::host::cache_home().join("runtimes");
+        fs::create_dir_all(&runtimes)?;
+        let out = runtimes.join(format!("{rt_key}.sqfs"));
+        if !out.exists() || opts.no_cache {
+            let tmp = runtimes.join(format!("{rt_key}.partial"));
+            mksquashfs(&base, &tmp, true, false)?;
+            fs::rename(&tmp, &out)?;
+        } else {
+            status(&format!("runtime: cached ({})", out.display()));
+        }
+        Some(out)
+    };
+    let app_upper = work.join("app-upper");
+    fresh_dir(&app_upper)?;
+    for step in &plan.steps {
+        match step {
+            BuildStep::Copy { from, to } => {
+                let dest = app_upper.join(to.trim_start_matches('/'));
+                status(&format!("copy: {} -> {to}", from.display()));
+                copy_tree(from, &dest)?;
+            }
+            BuildStep::Run(cmd) => bail!("os = windows: cannot run `{cmd}` on the build host"),
+        }
+    }
+    let app_sqfs = work.join("app.sqfs");
+    mksquashfs(&app_upper, &app_sqfs, true, false)?;
+    let mut data_files = Vec::new();
+    for l in &plan.data_layers {
+        let out = work.join(format!("data-{}.sqfs", l.name));
+        mksquashfs(&l.source, &out, l.compress, false)?;
+        data_files.push((l, out));
+    }
+    assemble(plan, opts, runtime_sqfs.as_deref(), &app_sqfs, &data_files)?;
     Ok(0)
 }
 
@@ -409,23 +457,49 @@ fn append_aligned(out: &mut fs::File, src: &Path) -> Result<u64> {
 fn assemble(
     plan: &Plan,
     opts: &Options,
-    runtime_sqfs: &Path,
+    runtime_sqfs: Option<&Path>,
     app_sqfs: &Path,
     data: &[DataFile<'_>],
 ) -> Result<()> {
-    status(&format!("assemble: {}", opts.out.display()));
+    let out_path = if plan.is_windows()
+        && !opts
+            .out
+            .extension()
+            .map(|e| e.eq_ignore_ascii_case("exe"))
+            .unwrap_or(false)
+    {
+        // Windows runs a file by its extension: `name.cell` becomes
+        // `name.cell.exe`.
+        let mut s = opts.out.as_os_str().to_owned();
+        s.push(".exe");
+        PathBuf::from(s)
+    } else {
+        opts.out.clone()
+    };
+    status(&format!("assemble: {}", out_path.display()));
     let launcher = fs::read(&opts.launcher)
         .with_context(|| format!("read launcher {}", opts.launcher.display()))?;
-    let tmp_out = opts.out.with_extension("cell.partial");
+    if plan.is_windows() != launcher.starts_with(b"MZ") {
+        bail!(
+            "launcher {} is not a {} launcher (pass --launcher or set {})",
+            opts.launcher.display(),
+            if plan.is_windows() {
+                "Windows"
+            } else {
+                "Linux"
+            },
+            if plan.is_windows() {
+                "CELL_LAUNCHER_WINDOWS"
+            } else {
+                "CELL_LAUNCHER"
+            }
+        );
+    }
+    let tmp_out = out_path.with_extension("cell.partial");
     let mut out = fs::File::create(&tmp_out)?;
     out.write_all(&launcher)?;
-    let sidecar_dir = {
-        let mut s = opts.out.as_os_str().to_owned();
-        s.push(".d");
-        PathBuf::from(s)
-    };
-    let out_dir = opts
-        .out
+    let sidecar_dir = format::sidecar_dir_for(&out_path);
+    let out_dir = out_path
         .parent()
         .map(Path::to_path_buf)
         .unwrap_or_else(|| PathBuf::from("."));
@@ -477,14 +551,16 @@ fn assemble(
         });
         Ok(())
     };
-    place(
-        &mut out,
-        "runtime",
-        LayerRole::Runtime,
-        "/",
-        runtime_sqfs,
-        plan.runtime.placement,
-    )?;
+    if let Some(runtime_sqfs) = runtime_sqfs {
+        place(
+            &mut out,
+            "runtime",
+            LayerRole::Runtime,
+            "/",
+            runtime_sqfs,
+            plan.runtime.placement,
+        )?;
+    }
     place(
         &mut out,
         "app",
@@ -503,6 +579,7 @@ fn assemble(
             name: plan.name.clone(),
             version: plan.version.clone(),
             arch: plan.arch.clone(),
+            os: plan.os.clone(),
         },
         entry: plan.entry.clone(),
         isolation: plan.isolation.clone(),
@@ -528,11 +605,11 @@ fn assemble(
     let total = out.stream_position()?;
     drop(out);
     fs::set_permissions(&tmp_out, fs::Permissions::from_mode(0o755))?;
-    fs::rename(&tmp_out, &opts.out)?;
+    fs::rename(&tmp_out, &out_path)?;
     let _ = TRAILER_LEN;
     status(&format!(
         "done: {} ({} MiB)",
-        opts.out.display(),
+        out_path.display(),
         total / (1024 * 1024)
     ));
     Ok(())
@@ -543,8 +620,8 @@ pub fn inspect(path: &Path) -> Result<()> {
     let cell = format::CellFile::open(path)?;
     let m = &cell.manifest;
     println!(
-        "{} {} ({}, {})",
-        m.app.name, m.app.version, m.app.id, m.app.arch
+        "{} {} ({}, {} {})",
+        m.app.name, m.app.version, m.app.id, m.app.os, m.app.arch
     );
     println!("launcher: {} bytes", cell.trailer.launcher_len);
     for l in &m.layers {

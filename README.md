@@ -2,12 +2,14 @@
 
 **One file. Any Linux. Sandboxed. GPU included.**
 
-Cell is a portable application format for Linux. A `.cell` file is a static
-launcher with a complete userland, the application and a manifest appended
-to it. Double-click it, or run it from a shell, on any distribution: Arch,
-Debian, Ubuntu, Fedora, Alpine, NixOS. The host's glibc, Mesa and libraries
-never matter, because the file carries its own. The application runs in a
-sandbox and sees nothing on the host that its manifest did not grant.
+Cell is a portable application format for Linux, with a Windows port in
+progress. A `.cell` file is a static launcher with a complete userland, the
+application and a manifest appended to it. Double-click it, or run it from a
+shell, on any distribution: Arch, Debian, Ubuntu, Fedora, Alpine, NixOS. The
+host's glibc, Mesa and libraries never matter, because the file carries its
+own. The application runs in a sandbox and sees nothing on the host that its
+manifest did not grant. A `.cell.exe` is the same format headed by a Windows
+launcher; see [Windows](#windows).
 
 ```sh
 ./tuxracer.cell                 # a full 3D game, Wayland or X11, GPU accelerated
@@ -31,6 +33,7 @@ them behind one declarative build file written in
 - [Layers and sharing](#layers-and-sharing)
 - [Cell Hub and Cell Launcher](#cell-hub-and-cell-launcher)
 - [Running a cell](#running-a-cell)
+- [Windows](#windows)
 - [State, saves and overrides](#state-saves-and-overrides)
 - [Building from source](#building-from-source)
 - [Examples and test results](#examples-and-test-results)
@@ -82,6 +85,7 @@ Cell's goals:
 | NVIDIA | host | per-version extension download | host symlinks | download to match the kernel module, or host symlinks |
 | Build definition | scripts | JSON/YAML manifest | shell commands | `cell.wcl` |
 | Build needs root or Docker | no | no | no | no |
+| Windows | no | no | no | yes, through WinFsp (no sandbox yet) |
 
 ## Quick start
 
@@ -375,6 +379,85 @@ library and in gaming mode like any other game. `CELL_STEAM_DIR` and
 `CELL_STEAM_USER` pick a Steam installation and account when there are
 several.
 
+## Windows
+
+A cell with `os = "windows"` in its build file is built on Linux like any
+other and comes out as `<name>.cell.exe`: the same trailer, manifest and
+squashfs layers behind a Windows launcher instead of the musl one. Nothing
+is extracted at build time and nothing from the host is needed at run time
+except [WinFsp](https://winfsp.dev), which supplies the file system driver.
+
+```wcl
+import <cell.wcl>
+
+app "dev.example.game" {
+  name    = "My Game"
+  version = "1.0"
+  os      = "windows"
+
+  build {
+    copy { from = "./dist/game" to = "/app/game" }
+  }
+
+  layer "assets" {
+    source      = "./dist/assets"
+    mount       = "/app/game/assets"
+    compression = :raw
+  }
+
+  entry {
+    exec = ["/app/game/Game.exe", "-data", "$CELL_ROOT/app/game/assets"]
+    cwd  = "/app/game"
+  }
+
+  isolation { home = :private }
+}
+```
+
+How it runs:
+
+- **Tier 0, WinFsp installed.** The launcher loads `winfsp-x64.dll` at run
+  time and serves the layers as one union volume mounted at
+  `%LOCALAPPDATA%\cell\mnt\<id>`. Reads come straight from the `.cell.exe`
+  file, lazily, so a large game starts as fast as a small tool. Writes go
+  to `%LOCALAPPDATA%\cell\apps\<id>\upper` with copy-on-write; deleting a
+  layer file writes a whiteout, like overlayfs. The volume is
+  case-insensitive, executables and DLLs load from it, and child processes
+  see it. Dropping the launcher removes the mount.
+- **Tier 1, no WinFsp.** The launcher extracts the layers once into
+  `%LOCALAPPDATA%\cell\apps\<id>\root`, keyed by the layer hashes, and runs
+  the app from there. `CELL_TIER=extract` forces this tier.
+
+The entry point uses the same `/app/...` paths as a Linux cell: `/` is the
+root of the layer stack. `$CELL_ROOT` in an argument, `cwd` or an `env`
+value expands to the host path of that root, and the app also gets it as
+the `CELL_ROOT` variable. Apps must be relocatable, which Windows games and
+portable apps already are; a WinFsp volume cannot overlay `C:\`.
+
+`home = :private` and `:portable` set `USERPROFILE`, `APPDATA`,
+`LOCALAPPDATA`, `TEMP` and `TMP` to a per-app home, so saves and settings
+land there; `:host` leaves them alone. `CELL_CMD=info`, `verify`,
+`manifest` and `shell` work as on Linux.
+
+What a Windows cell does not have yet, in order of likely arrival:
+
+- **A process sandbox.** Hooks or WinFsp give a file system, not a
+  boundary. `network = false`, `bind` blocks and the grants do nothing; the
+  app has whatever the user has. AppContainer is the planned answer.
+- **A virtual registry.** The app reads and writes the real `HKCU`.
+- **`run` build steps.** The build tool runs on Linux, so a Windows
+  installer cannot execute during a build; `copy` the installed files.
+- Desktop and Steam integration (`CELL_CMD=install`, `steam-add`), the PE
+  icon, code signing, and 32-bit or ARM64 launchers.
+
+The build tool rejects names Windows cannot hold (`:`, `?`, `CON`, trailing
+dots) and files that differ only in case. `examples/win-test/` is a cell
+that tests the launcher from inside (file reads, copy-up, whiteouts,
+renames, memory mapping, DLL loading, a child process, the private home)
+and `examples/wine-doom/cell-windows.wcl` packs Chocolate Doom's own Windows
+build. `lab/windows/` is a vmlab lab with a Windows 11 machine for running
+them; `just win-run win-test` copies a built example in and runs it.
+
 ## Cell Hub and Cell Launcher
 
 The server side and the desktop library live in their own repository,
@@ -407,7 +490,9 @@ blobs and extracted bases), `runtimes/` (built runtime layers), `drivers/`
 Requirements on the build machine:
 
 - A Rust toolchain with the `x86_64-unknown-linux-musl` target
-  (`rustup target add x86_64-unknown-linux-musl`).
+  (`rustup target add x86_64-unknown-linux-musl`). For Windows cells also
+  the `x86_64-pc-windows-gnu` target and `mingw-w64`
+  (`x86_64-w64-mingw32-gcc`).
 - `zig`, used as the musl C compiler for the zstd and ring sources through
   `tools/musl-cc`.
 - `squashfs-tools` (`mksquashfs`) for the build tool.
@@ -421,6 +506,10 @@ just all-build                   # the static launcher and the cell tool
 just example-build cell-builder  # the build tool as a cell, in examples/dist/
 just example-build tuxracer      # Extreme Tux Racer on an Arch runtime
 just workspace-check             # tests and clippy
+just launcher-build-windows      # the Windows launcher (cell-launcher.exe)
+just win-test-build              # the Windows test program and its DLL
+just example-build-windows win-test            # examples/dist/win-test.cell.exe
+just example-build-windows wine-doom cell-windows   # examples/dist/wine-doom.cell.exe
 ```
 
 The workspace has three crates:
@@ -428,7 +517,7 @@ The workspace has three crates:
 | Crate | Role |
 | --- | --- |
 | `cell-core` | The file format and manifest, a random-access squashfs reader, the FUSE server, the sandbox (namespaces, mounts, grants, `pivot_root`, `exec`), host probing, NVIDIA driver fetching |
-| `cell-launcher` | The static musl binary that heads every `.cell`: 3 MiB, no dynamic dependencies |
+| `cell-launcher` | The static musl binary that heads every `.cell`: 3 MiB, no dynamic dependencies. Built for `x86_64-pc-windows-gnu` it is the Windows launcher: WinFsp union mount or extraction, a job object, the private home |
 | `cell` | The build tool: reads `cell.wcl` through the WCL crate, pulls OCI images, runs builds in a user namespace, packs and assembles |
 
 The WCL dependency is pinned to a git revision of
@@ -451,6 +540,14 @@ Wayland, Intel Iris Xe plus an NVIDIA RTX 4060 on driver 615.71.09:
 | `wine-doom` | 767 MiB | Wine prefix created on first run; Minesweeper and Chocolate Doom (Freedoom) run through Wine with wined3d and DirectSound audio |
 | `cell-builder` | 12 MiB | The build tool itself; built `gl-tools` and a fresh Arch runtime with pacman from inside its own sandbox |
 | `openttd` | 4 MiB + 258 MiB runtime | OpenTTD client as the entry point and `command "server"` for the dedicated server, which Cell Hub can host |
+
+Windows, tested on 2026-10-21 on a Windows 11 24H2 (26100) vmlab machine with
+WinFsp 2.x installed:
+
+| Example | Size | Result |
+| --- | --- | --- |
+| `win-test` | 12 MiB | All 15 checks pass through the WinFsp union volume and again with `CELL_TIER=extract`: lower reads, case-insensitive lookup, a 16 MiB pattern read and memory-mapped, copy-up on append, whiteout on delete, mkdir and rename, DLL loading from the layer, a `:raw` data layer at `/assets`, a child `cmd` reading the layer, a writable private home. The mount point is gone after exit |
+| `wine-doom` (`cell-windows.wcl`) | 63 MiB | Chocolate Doom's 32-bit Windows build runs Freedoom from the mounted volume, launched from the Run dialog; the mount is also visible to other sessions on the machine |
 
 ## How it works
 
@@ -483,6 +580,12 @@ subordinate ids, or with one mapped id when running inside a cell.
 
 ## Host requirements
 
+Windows: Windows 10 or 11 x64, and [WinFsp](https://winfsp.dev) for the
+mounted tier (one installer, no reboot). Without it the launcher extracts
+the layers once.
+
+Linux:
+
 | Needs | Why |
 | --- | --- |
 | Linux 5.11 or newer | Overlayfs inside a user namespace. FUSE in a user namespace needs 4.18 |
@@ -510,8 +613,14 @@ verification, `docker://`, `tar://` and `dir://` bases, data layers,
 sidecar and referenced placement, named commands, instance locking, the
 packaged builder, the agent skill.
 
+Working on Windows: the `.cell.exe` format, the WinFsp union mount, the
+extract fallback, `$CELL_ROOT`, the private home, the job object, the
+Windows name checks in the build tool.
+
 Planned:
 
+- Windows: an AppContainer sandbox for `network` and `bind`, a virtual
+  registry, desktop and Steam integration, the PE icon, signing
 - seccomp filters and a filtered D-Bus proxy for portals
 - signing with ed25519 and a verification policy
 - fetching a missing referenced layer from a URL recorded in the manifest

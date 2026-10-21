@@ -6,3 +6,6 @@ examples/dist/
 *.cell.partial
 examples/*/build.log
 examples/wine-doom/dist/
+# The Windows test lab's state and screenshots.
+lab/windows/.vmlab/
+lab/windows/scripts/shots/

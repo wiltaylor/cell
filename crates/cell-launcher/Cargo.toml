@@ -3,7 +3,7 @@ name = "cell-launcher"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "The static launcher that heads every .cell file."
+description = "The launcher that heads every .cell file: static musl on Linux, a PE on Windows."
 
 [[bin]]
 name = "cell-launcher"
@@ -11,6 +11,17 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow.workspace = true
-libc.workspace = true
 cell-core = { path = "../cell-core" }
 blake3.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libc.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Console",
+    "Win32_System_JobObjects",
+    "Win32_System_Threading",
+] }

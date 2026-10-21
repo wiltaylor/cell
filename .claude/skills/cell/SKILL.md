@@ -1,6 +1,6 @@
 ---
 name: cell
-description: Builds, runs and debugs Cell portable Linux applications (.cell files) from cell.wcl build files, with the packaged cell-builder.cell or the cell tool. Use when the user wants to package an app, game or CLI tool as a .cell, write or fix a cell.wcl, choose grants (display, audio, GPU, gamepads, network, home), share a runtime layer between cells, or work out why a .cell does not start, has no window, no sound or no GPU.
+description: Builds, runs and debugs Cell portable applications (.cell files for Linux, .cell.exe for Windows) from cell.wcl build files, with the packaged cell-builder.cell or the cell tool. Use when the user wants to package an app, game or CLI tool as a .cell, write or fix a cell.wcl, make a Windows cell (os = "windows"), choose grants (display, audio, GPU, gamepads, network, home), share a runtime layer between cells, or work out why a .cell does not start, has no window, no sound or no GPU.
 user-invocable: true
 argument-hint: <help|new|build|run|debug> [args...]
 allowed-tools:
@@ -13,9 +13,10 @@ allowed-tools:
 ---
 
 <overview>
-Cell is a portable, sandboxed application format for Linux. One `.cell` file holds a
-static launcher, a complete userland with its own glibc, the application, and a
-manifest of grants. A `cell.wcl` file describes the build; `cell build` turns it into a
+Cell is a portable, sandboxed application format for Linux, with a Windows port that
+mounts the same layers through WinFsp. One `.cell` file holds a static launcher, a
+complete userland with its own glibc, the application, and a manifest of grants; a
+`.cell.exe` holds the Windows launcher, the application and the manifest. A `cell.wcl` file describes the build; `cell build` turns it into a
 `.cell`. This skill writes build files, builds them, runs the result, and diagnoses
 failures. It works with either the installed `cell` tool or the packaged
 `cell-builder.cell`, which needs no installation.

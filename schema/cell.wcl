@@ -38,6 +38,8 @@ type App {
   version: utf8?
   @doc("CPU architecture of the payload")
   @options(["x86_64", "aarch64"]) arch: utf8?
+  @doc("Target operating system. A windows cell is a .cell.exe headed by the Windows launcher; its runtime block is optional and may only use dir:// or tar:// bases")
+  @options(["linux", "windows"]) os: utf8?
   @doc("Name of a template block whose settings this app starts from")
   template: utf8?
   @child("runtime")     runtime:     Runtime?

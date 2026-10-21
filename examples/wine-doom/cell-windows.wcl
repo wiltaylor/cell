@@ -1,0 +1,36 @@
+// Chocolate Doom's own Windows build, as a Windows cell. The same files
+// the wine-doom example runs under Wine on Linux run natively here.
+// Fetch them with ./fetch-assets.sh first, then:
+//
+//   cell build cell-windows.wcl -o ../dist/win-doom.cell
+//
+// which writes win-doom.cell.exe.
+
+import <cell.wcl>
+
+app "dev.wiltaylor.win-doom" {
+  name    = "Chocolate Doom (Windows)"
+  version = "3.1.0"
+  arch    = "x86_64"
+  os      = "windows"
+
+  build {
+    copy { from = "./dist/chocolate-doom" to = "/app/chocolate-doom" }
+  }
+
+  layer "wads" {
+    source      = "./dist/freedoom"
+    mount       = "/app/freedoom"
+    compression = :raw
+  }
+
+  entry {
+    exec = ["/app/chocolate-doom/chocolate-doom.exe", "-iwad", "$CELL_ROOT/app/freedoom/freedoom1.wad", "-window"]
+    cwd  = "/app/chocolate-doom"
+  }
+
+  isolation {
+    network = false
+    home    = :private
+  }
+}

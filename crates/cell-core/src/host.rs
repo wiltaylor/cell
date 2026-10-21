@@ -1,6 +1,8 @@
 //! What the host offers. The launcher probes once and decides its tier.
 
-use std::path::{Path, PathBuf};
+#[cfg(target_os = "linux")]
+use std::path::Path;
+use std::path::PathBuf;
 
 #[derive(Debug, Clone, Default)]
 pub struct HostProbe {
@@ -29,6 +31,7 @@ fn env(k: &str) -> Option<String> {
     std::env::var(k).ok().filter(|v| !v.is_empty())
 }
 
+#[cfg(target_os = "linux")]
 pub fn probe() -> HostProbe {
     let uid = unsafe { libc::getuid() };
     let gid = unsafe { libc::getgid() };
@@ -119,7 +122,28 @@ pub fn probe() -> HostProbe {
     }
 }
 
-/// `$XDG_DATA_HOME/cell` or `~/.local/share/cell`.
+/// `$XDG_DATA_HOME/cell` or `~/.local/share/cell`; on Windows
+/// `%LOCALAPPDATA%\cell`.
+#[cfg(windows)]
+pub fn data_home() -> PathBuf {
+    local_app_data().join("cell")
+}
+
+/// `%LOCALAPPDATA%\cell\cache` on Windows.
+#[cfg(windows)]
+pub fn cache_home() -> PathBuf {
+    local_app_data().join("cell").join("cache")
+}
+
+#[cfg(windows)]
+fn local_app_data() -> PathBuf {
+    env("LOCALAPPDATA")
+        .map(PathBuf::from)
+        .or_else(|| env("USERPROFILE").map(|u| PathBuf::from(u).join("AppData").join("Local")))
+        .unwrap_or_else(|| PathBuf::from("C:\\cell"))
+}
+
+#[cfg(not(windows))]
 pub fn data_home() -> PathBuf {
     env("XDG_DATA_HOME")
         .map(PathBuf::from)
@@ -130,6 +154,7 @@ pub fn data_home() -> PathBuf {
 }
 
 /// `$XDG_CACHE_HOME/cell` or `~/.cache/cell`.
+#[cfg(not(windows))]
 pub fn cache_home() -> PathBuf {
     env("XDG_CACHE_HOME")
         .map(PathBuf::from)

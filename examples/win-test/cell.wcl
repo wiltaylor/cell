@@ -1,0 +1,39 @@
+// A Windows cell that tests the launcher from inside. Build the test
+// program first (see the justfile recipe `win-test-build`), then:
+//
+//   cell build cell.wcl -o ../dist/win-test.cell
+//
+// which writes win-test.cell.exe. Run it on Windows; it prints PASS or
+// FAIL per check and exits non-zero on a failure.
+
+import <cell.wcl>
+
+app "dev.wiltaylor.win-test" {
+  name    = "Cell Windows test"
+  version = "0.1.0"
+  arch    = "x86_64"
+  os      = "windows"
+
+  build {
+    copy { from = "./target/x86_64-pc-windows-gnu/release/celltest.exe" to = "/app/celltest.exe" }
+    copy { from = "./dll/target/x86_64-pc-windows-gnu/release/cellanswer.dll" to = "/app/cellanswer.dll" }
+    copy { from = "./dist/data" to = "/app/data" }
+  }
+
+  layer "assets" {
+    source      = "./dist/assets"
+    mount       = "/assets"
+    compression = :raw
+  }
+
+  entry {
+    exec = ["/app/celltest.exe", "--from-manifest", "$CELL_ROOT/app/data"]
+    cwd  = "/app"
+    env "CELLTEST_ENV" { value = "set" }
+  }
+
+  isolation {
+    network = false
+    home    = :private
+  }
+}

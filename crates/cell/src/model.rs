@@ -61,6 +61,8 @@ pub struct Plan {
     pub name: String,
     pub version: String,
     pub arch: String,
+    /// `linux` or `windows`.
+    pub os: String,
     pub runtime: RuntimeSpec,
     pub steps: Vec<BuildStep>,
     pub data_layers: Vec<DataLayer>,
@@ -197,12 +199,16 @@ pub fn plan(doc: &Document, root: &Path) -> Result<Plan> {
         id: label(app)?,
         root: root.to_path_buf(),
         arch: "x86_64".into(),
+        os: "linux".into(),
         ..Default::default()
     };
     plan.name = string(app, "name")?.unwrap_or_else(|| plan.id.clone());
     plan.version = string(app, "version")?.unwrap_or_else(|| "0.0.0".into());
     if let Some(a) = string(app, "arch")? {
         plan.arch = a;
+    }
+    if let Some(o) = string(app, "os")? {
+        plan.os = o;
     }
     // Template first, app on top.
     let mut sources: Vec<&Block> = Vec::new();
@@ -255,7 +261,7 @@ pub fn plan(doc: &Document, root: &Path) -> Result<Plan> {
             )?;
         }
     }
-    if plan.runtime.base.is_empty() {
+    if plan.runtime.base.is_empty() && !plan.is_windows() {
         bail!("`runtime {{ base = ... }}` is required");
     }
     if plan.entry.exec.is_empty() {
@@ -456,8 +462,110 @@ fn read_integration(
 }
 
 /// Rules the schema cannot express.
+impl Plan {
+    pub fn is_windows(&self) -> bool {
+        self.os == "windows"
+    }
+}
+
+/// Walk a host directory and report names Windows cannot hold, plus names
+/// that differ only in case (the union volume is case-insensitive).
+fn windows_name_issues(root: &Path, label: &str, issues: &mut Vec<String>) {
+    fn walk(dir: &Path, rel: &str, label: &str, issues: &mut Vec<String>) {
+        let Ok(rd) = std::fs::read_dir(dir) else {
+            return;
+        };
+        let mut seen: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+        for e in rd.flatten() {
+            let name = e.file_name().to_string_lossy().into_owned();
+            let here = if rel.is_empty() {
+                name.clone()
+            } else {
+                format!("{rel}/{name}")
+            };
+            if let Some(why) = cell_core::extract::windows_name_problem(&name) {
+                issues.push(format!("{label}: `{here}` {why}"));
+            }
+            if let Some(other) = seen.insert(name.to_lowercase(), name.clone()) {
+                issues.push(format!(
+                    "{label}: `{here}` and `{other}` differ only in case; Windows sees one file"
+                ));
+            }
+            if e.path().is_dir() {
+                walk(&e.path(), &here, label, issues);
+            }
+        }
+    }
+    if root.is_dir() {
+        walk(root, "", label, issues);
+    } else if let Some(name) = root.file_name() {
+        if let Some(why) = cell_core::extract::windows_name_problem(&name.to_string_lossy()) {
+            issues.push(format!("{label}: `{}` {why}", name.to_string_lossy()));
+        }
+    }
+}
+
 pub fn validate(plan: &Plan) -> Vec<String> {
     let mut issues = Vec::new();
+    if plan.os != "linux" && plan.os != "windows" {
+        issues.push(format!("os: `{}` must be linux or windows", plan.os));
+    }
+    if plan.is_windows() {
+        if plan.arch != "x86_64" {
+            issues.push(format!(
+                "os = windows: arch `{}` has no launcher yet (x86_64 only)",
+                plan.arch
+            ));
+        }
+        if !plan.runtime.packages.is_empty() || !plan.runtime.setup.is_empty() {
+            issues.push("os = windows: runtime.packages and runtime.setup need a Linux package manager; copy the files instead".into());
+        }
+        if !plan.runtime.base.is_empty()
+            && !["dir://", "tar://"]
+                .iter()
+                .any(|s| plan.runtime.base.starts_with(s))
+        {
+            issues.push(format!(
+                "os = windows: runtime.base `{}` must be dir:// or tar:// (no package manager runs for a Windows cell)",
+                plan.runtime.base
+            ));
+        }
+        if plan.runtime.multilib {
+            issues.push("os = windows: runtime.multilib does not apply".into());
+        }
+        for s in &plan.steps {
+            match s {
+                BuildStep::Run(cmd) => issues.push(format!(
+                    "os = windows: `run \"{cmd}\"` cannot execute on the Linux build host; use copy steps"
+                )),
+                BuildStep::Copy { from, to } => {
+                    windows_name_issues(from, &format!("copy {to}"), &mut issues);
+                    if let Some(last) = to.trim_end_matches('/').rsplit('/').next() {
+                        if let Some(why) = cell_core::extract::windows_name_problem(last) {
+                            issues.push(format!("copy: `{to}` {why}"));
+                        }
+                    }
+                }
+            }
+        }
+        for l in &plan.data_layers {
+            windows_name_issues(&l.source, &format!("layer {}", l.name), &mut issues);
+        }
+        if !plan.integration.display.is_empty()
+            || !plan.integration.audio.is_empty()
+            || !plan.integration.input.is_empty()
+        {
+            issues.push("os = windows: display, audio and input grants do not apply; the app uses the host Win32 APIs (leave them out)".into());
+        }
+        if plan.entry.gamescope {
+            issues.push("os = windows: gamescope does not apply".into());
+        }
+        if !plan.isolation.binds.is_empty() {
+            issues.push(
+                "os = windows: bind blocks are not implemented (no process sandbox yet)".into(),
+            );
+        }
+    }
     let has = |d: Display| plan.integration.display.contains(&d);
     if has(Display::X11Fallback) && !has(Display::Wayland) {
         issues.push("display: :x11_fallback needs :wayland in the same list".into());
@@ -496,7 +604,7 @@ pub fn validate(plan: &Plan) -> Vec<String> {
     let scheme_ok = ["oci://", "docker://", "tar://", "dir://"]
         .iter()
         .any(|s| plan.runtime.base.starts_with(s));
-    if !scheme_ok {
+    if !scheme_ok && !(plan.is_windows() && plan.runtime.base.is_empty()) {
         issues.push(format!(
             "runtime.base `{}` must start with oci://, docker://, tar:// or dir://",
             plan.runtime.base

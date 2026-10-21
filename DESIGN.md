@@ -638,3 +638,104 @@ sections above:
 - **Opaque-directory markers from the build overlay are not carried** into
   the app layer, because the FUSE server does not serve xattrs. Whiteouts
   (character devices 0:0) are carried.
+
+## 16. Windows (2026-10-21)
+
+The format ports as is: a `.cell.exe` is the Windows launcher (a PE built
+for `x86_64-pc-windows-gnu`) with the same layers, CBOR manifest and
+trailer appended. A PE loader ignores trailing data like an ELF loader
+does. The manifest gained `app.os` (`linux` by default) so a launcher can
+refuse a file for the other OS, and the build tool chooses the launcher
+from it. `cell build` runs on Linux for both.
+
+What Windows lacks is the runtime: no unprivileged user namespaces, no
+FUSE, no overlayfs. ThinApp and Cameyo answer that with an API-hooking
+engine inside the process. Cell answers it with WinFsp, which is what a
+FUSE server would be on Windows, and a fallback that needs nothing.
+
+### 16.1 Tiers
+
+| Tier | Needs | Lazy | Writes |
+| --- | --- | --- | --- |
+| 0 | WinFsp installed (one MSI, admin once, no reboot) | yes | union volume, copy-up into `%LOCALAPPDATA%\cell\apps\<id>\upper` |
+| 1 | nothing | no, extract once per layer-hash set | into the extracted tree at `...\apps\<id>\root` |
+
+The launcher never links WinFsp. `cell_core::winfsp` finds
+`winfsp-x64.dll` through the installer's registry key or the Program Files
+path, loads it with `LoadLibraryW` and resolves the dozen entry points it
+uses. So the same `.exe` runs on a host without WinFsp and picks tier 1.
+The struct layouts (`FSP_FSCTL_VOLUME_PARAMS`, `FILE_INFO`, `DIR_INFO`,
+the interface table) are declared by hand from the WinFsp 2.x headers with
+size assertions.
+
+### 16.2 The union file system
+
+`cell_core::unionfs` is overlayfs in user mode:
+
+- Lowers are the squashfs layers, read with the same reader the Linux FUSE
+  server uses. The root stack (runtime, app) mounts at `/`; data layers
+  mount at their path, and the directories above a mount point exist
+  synthetically when no layer has them.
+- The upper is an NTFS directory. The upper wins; directories merge; a
+  file in a higher layer hides the layers below it.
+- A delete of a lower name writes `.cellwh.<name>` beside it in the upper.
+  A whiteout plus an upper entry of the same name is opaque: the lower is
+  hidden even for a directory, which is what "remove, then recreate" needs.
+- Any open with a write-ish access mask (`FILE_WRITE_DATA`, `APPEND`,
+  `WRITE_EA`, `WRITE_ATTRIBUTES`, `DELETE`, `WRITE_DAC`, `WRITE_OWNER`)
+  copies the lower file up first, then opens the upper copy. A directory
+  opened for write is created in the upper. Renaming a lower directory
+  copies its whole tree up.
+- Lower names are matched without case through a per-directory folded
+  index, because the volume reports itself case-insensitive like NTFS. The
+  build tool refuses layers that have two names differing only in case,
+  or names Windows cannot hold.
+- One security descriptor serves every file: full access for SYSTEM,
+  administrators, Everyone and app containers. The sandbox is not the ACL.
+- The volume calls itself `NTFS`, which WinFsp's FAQ asks for so that a
+  program run as administrator from the volume starts.
+- Directory listings use WinFsp's directory-buffer helpers so markers and
+  partial reads work without more code here.
+
+The mount point is `%LOCALAPPDATA%\cell\mnt\<id>`, a directory WinFsp
+creates and removes. A second instance of the same app mounts at
+`<id>-<pid>` with a throwaway upper, as on Linux. Seen in the lab: a mount
+made by one logon is visible to SYSTEM in another session, so nothing is
+per-session about it.
+
+### 16.3 The launcher
+
+`cell-launcher/src/windows.rs`. It joins a job object with
+kill-on-close before spawning, so every descendant dies with the
+launcher, which is the Linux init guarantee. Ctrl-C is left to the app.
+`$CELL_ROOT` and `$PWD` expand in arguments, `cwd` and `env` values;
+`exec[0]` and `cwd` that start with `/` map onto the root.
+`home = :private | :portable` sets `USERPROFILE`, `APPDATA`,
+`LOCALAPPDATA`, `TEMP` and `TMP` to a per-app home. That is an environment
+convention, not an enforcement.
+
+### 16.4 Not done, in order
+
+1. **Sandbox.** AppContainer: `CreateAppContainerProfile` needs no admin;
+   `network = false` becomes "no `internetClient` capability" and a `bind`
+   becomes an ACL for the container SID. Many desktop apps break inside an
+   AppContainer, so it must be a manifest switch. Until then `network`,
+   `bind` and the grants are accepted and ignored, and `CELL_CMD=info`
+   says so.
+2. **Registry.** `RegLoadAppKey` for the layer hive and the upper hive,
+   plus registry hooks to merge them. Captured at build time from a diff.
+3. **Build-time capture.** `run` steps need a Windows build host: run the
+   installer under the launcher with a scratch upper and freeze the upper
+   into the app layer. This is the ThinApp and Cameyo capture, declarative.
+4. Desktop and Steam integration, the PE icon resource, Authenticode
+   signing (unsigned EXEs with a large overlay trip SmartScreen), 32-bit
+   and ARM64 launchers.
+
+### 16.5 Licence note
+
+WinFsp is GPLv3 with a FLOSS exception that allows linking the DLL and
+shipping the installer from software under a FLOSS licence, with a notice
+in the UI and documentation, and not "linked or distributed with
+proprietary software". Cell is MIT. A commercial game packed as a cell
+needs the question answered before it ships; the author offers a
+commercial licence.

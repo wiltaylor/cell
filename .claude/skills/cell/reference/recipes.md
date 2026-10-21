@@ -156,6 +156,48 @@ app "dev.example.mytool" {                       // CHANGE
 
 Arguments after the cell name go to the program: `./mytool.cell --flag file`.
 
+## windows-app: a Windows program as a `.cell.exe`
+
+The build runs on Linux and needs `target/x86_64-pc-windows-gnu/release/cell-launcher.exe`
+(`just launcher-build-windows`, or `CELL_LAUNCHER_WINDOWS=<path>`). The app must be
+relocatable, which games and portable apps are: the files appear under a mount point,
+never under `C:\Program Files`. There is no runtime block, no `run` step and no grant;
+copy the installed files in and point the entry at them.
+
+```wcl
+import <cell.wcl>
+
+app "dev.example.game" {
+  name    = "My Game"
+  version = "1.0"
+  os      = "windows"
+
+  build {
+    copy { from = "./dist/game" to = "/app/game" }
+  }
+
+  layer "assets" {
+    source      = "./dist/assets"
+    mount       = "/app/game/assets"
+    compression = :raw
+  }
+
+  entry {
+    exec = ["/app/game/Game.exe", "-data", "$CELL_ROOT/app/game/assets"]
+    cwd  = "/app/game"
+  }
+
+  isolation { home = :private }
+}
+```
+
+`cell build cell.wcl -o game.cell` writes `game.cell.exe`. On a Windows host with WinFsp
+installed it mounts the layers at `%LOCALAPPDATA%\cell\mnt\<id>` and runs the entry;
+without WinFsp it extracts them once. `home = :private` points `USERPROFILE`, `APPDATA`,
+`LOCALAPPDATA` and `TEMP` at a per-app home. Nothing sandboxes the process yet, so
+`network` and `bind` have no effect on Windows. The build tool rejects file names
+Windows cannot hold and names that differ only in case.
+
 ## Sharing one runtime between many games
 
 Give each game the same `runtime` block (same base, packages, setup, multilib) and

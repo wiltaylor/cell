@@ -21,24 +21,40 @@ fn usage() -> ! {
     std::process::exit(2)
 }
 
-fn find_launcher(explicit: Option<PathBuf>) -> Result<PathBuf> {
+fn find_launcher(explicit: Option<PathBuf>, windows: bool) -> Result<PathBuf> {
     if let Some(p) = explicit {
         return Ok(p);
     }
-    if let Ok(p) = std::env::var("CELL_LAUNCHER") {
+    let var = if windows {
+        "CELL_LAUNCHER_WINDOWS"
+    } else {
+        "CELL_LAUNCHER"
+    };
+    if let Ok(p) = std::env::var(var) {
         return Ok(PathBuf::from(p));
     }
     let exe = std::env::current_exe()?;
     let dir = exe.parent().context("exe dir")?;
-    let candidates = [
-        dir.join("cell-launcher"),
-        dir.join("../x86_64-unknown-linux-musl/release/cell-launcher"),
-        dir.join("../../x86_64-unknown-linux-musl/release/cell-launcher"),
-    ];
+    let candidates = if windows {
+        [
+            dir.join("cell-launcher.exe"),
+            dir.join("../x86_64-pc-windows-gnu/release/cell-launcher.exe"),
+            dir.join("../../x86_64-pc-windows-gnu/release/cell-launcher.exe"),
+        ]
+    } else {
+        [
+            dir.join("cell-launcher"),
+            dir.join("../x86_64-unknown-linux-musl/release/cell-launcher"),
+            dir.join("../../x86_64-unknown-linux-musl/release/cell-launcher"),
+        ]
+    };
     for c in candidates {
         if c.exists() {
             return Ok(c.canonicalize()?);
         }
+    }
+    if windows {
+        bail!("cannot find cell-launcher.exe; pass --launcher or set CELL_LAUNCHER_WINDOWS (build it with `cargo build --release -p cell-launcher --target x86_64-pc-windows-gnu`)")
     }
     bail!("cannot find cell-launcher; pass --launcher or set CELL_LAUNCHER (build it with `cargo build --release -p cell-launcher --target x86_64-unknown-linux-musl`)")
 }
@@ -108,7 +124,7 @@ fn real_main() -> Result<()> {
             };
             let opts = build::Options {
                 out,
-                launcher: find_launcher(launcher)?,
+                launcher: find_launcher(launcher, plan.is_windows())?,
                 no_cache,
             };
             let code = ns::with_mapped_root(|| build::run_build(&plan, &opts))?;

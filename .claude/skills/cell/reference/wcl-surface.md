@@ -9,8 +9,9 @@ need braces even when empty: `run "cmd" { }`.
 | `app "<id>"` | label | required | Reverse-DNS id; names the state directory |
 | `app.name`, `app.version` | utf8 | id, `0.0.0` | Shown by `info` and `inspect` |
 | `app.arch` | `"x86_64"` or `"aarch64"` | `x86_64` | Payload architecture |
+| `app.os` | `"linux"` or `"windows"` | `linux` | Target OS. `windows` makes a `<name>.cell.exe` headed by the Windows launcher; `runtime` is then optional and may only use `dir://` or `tar://`, `run` steps and the display/audio/input grants are rejected, and `$CELL_ROOT` expands to the mounted root in `exec`, `cwd` and `env` |
 | `app.template` | utf8 | — | Name of a `template "<name>" { }` block in the same file whose blocks this app starts from |
-| `runtime.base` | utf8 | required | `oci://image:tag` (native registry pull), `docker://image` (local Docker), `tar://path-or-url`, `dir://path` |
+| `runtime.base` | utf8 | required (optional when `os = "windows"`) | `oci://image:tag` (native registry pull), `docker://image` (local Docker), `tar://path-or-url`, `dir://path` |
 | `runtime.multilib` | bool | false | Enable 32-bit packages (Arch multilib). Needed for Wine |
 | `runtime.placement` | `:embedded`, `:sidecar`, `:referenced` | `:embedded` | Where the runtime layer goes. `:referenced` writes `runtime-<hash>.layer` beside the output, shared by cells in that directory |
 | `runtime.packages` | list<utf8> | — | Installed with the base's package manager (pacman, apk, apt-get, dnf) |

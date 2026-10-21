@@ -1,0 +1,20 @@
+# A test program for Windows cells. Not a workspace member: it is
+# cross-compiled for x86_64-pc-windows-gnu and packed into win-test.cell.exe.
+[package]
+name = "celltest"
+version = "0.1.0"
+edition = "2021"
+
+[workspace]
+
+[dependencies]
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Storage_FileSystem",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Memory",
+] }
+
+[profile.release]
+strip = true

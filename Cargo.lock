@@ -144,6 +144,7 @@ dependencies = [
  "serde",
  "tar",
  "ureq",
+ "windows-sys 0.61.2",
  "zstd",
 ]
 
@@ -155,6 +156,7 @@ dependencies = [
  "blake3",
  "cell-core",
  "libc",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

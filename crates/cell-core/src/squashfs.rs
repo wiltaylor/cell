@@ -7,7 +7,6 @@
 use std::collections::{HashMap, VecDeque};
 use std::fs::File;
 use std::io::Read;
-use std::os::unix::fs::FileExt;
 use std::sync::{Arc, Mutex};
 
 use anyhow::{bail, Context, Result};
@@ -164,8 +163,7 @@ impl Squashfs {
     /// Open an image that starts at `base` inside `file`.
     pub fn open(file: File, base: u64) -> Result<Self> {
         let mut sbb = [0u8; 96];
-        file.read_exact_at(&mut sbb, base)
-            .context("read superblock")?;
+        crate::pread::read_exact_at(&file, &mut sbb, base).context("read superblock")?;
         if u32_at(&sbb, 0) != MAGIC {
             bail!("not a squashfs image at offset {base}");
         }
@@ -205,8 +203,7 @@ impl Squashfs {
     }
 
     fn read_at(&self, buf: &mut [u8], off: u64) -> Result<()> {
-        self.file
-            .read_exact_at(buf, self.base + off)
+        crate::pread::read_exact_at(&self.file, buf, self.base + off)
             .with_context(|| format!("read {} bytes at {}", buf.len(), off))
     }
 

@@ -1,0 +1,23 @@
+// A Windows 11 machine for testing Windows cells. The published template
+// carries WinFsp already (vmlab uses it for shares), so tier 0 and the
+// extract fallback (CELL_TIER=extract) can both be tested on it.
+//
+//   cd lab/windows && vmlab up
+//   vmlab cp ../../examples/dist/win-test.cell.exe win:C:/cell/win-test.cell.exe
+//   vmlab exec --user vmlab win -- C:/cell/win-test.cell.exe
+
+import <vmlab.wcl>
+
+lab "cell-windows" {
+  vm "win" {
+    template = "ghcr.io/vmlabdev/vmlab-templates/windows-11"
+    arch     = "x86_64"
+    cpus     = 4
+    memory   = 8GiB
+    nic { nat = true }
+    login "vmlab" {
+      user     = "vmlab"
+      password = "vmlab123!"
+    }
+  }
+}
