@@ -748,18 +748,51 @@ hard way:
 The manifest field is `isolation { sandbox = :appcontainer | :off }`,
 default on; `CELL_SANDBOX=off` overrides per run. Linux ignores it.
 
-### 16.5 Not done, in order
+### 16.5 The registry (2026-10-21)
 
-1. **Registry.** `RegLoadAppKey` for the layer hive and the upper hive,
-   plus registry hooks to merge them. Captured at build time from a diff.
-2. **Build-time capture.** `run` steps need a Windows build host: run the
+ThinApp and Cameyo virtualise the registry with hooks inside the
+process. Cell does not: the app reads and writes the user's real
+`HKEY_CURRENT_USER`, and the cell declares the keys it needs. That is
+the same shape as `bind` for files: explicit, visible in `info`, and no
+code injected into the app.
+
+`cell-core/src/registry.rs` holds the manifest types (`Registry` with
+`keys` and `grants`, paths relative to `HKCU` with `\`), a `.reg` parser
+(regedit 5.00 in UTF-16 or UTF-8, `REGEDIT4`, every common type, line
+continuations, no deletions, no other hives) and a `.reg` writer. The
+build file's `registry` block takes an `import`, inline `key` and
+`value` blocks and a `grant` list; a key declared twice merges. The
+manifest field is `registry`, empty by default, so old files decode.
+
+`cell-launcher/src/registry.rs` applies it after the root is ready and
+before the spawn. Each key is created with `RegCreateKeyExW`; a value is
+written when the key is new or the value is missing, and at every start
+when it names `$CELL_ROOT`, because the mounted root differs between the
+tiers and between instances. Grant-only keys are created empty. With
+the sandbox on, every declared key and grant gets an inheritable ACE for
+the container SID (`SetNamedSecurityInfoW` with `SE_REGISTRY_KEY` on
+`CURRENT_USER\...`). Measured on Windows 11: a lowbox token reads `HKCU`
+but cannot create a key under `HKCU\Software` (error 5), and a key with
+the container's ACE is fully writable from inside, so the grant is both
+necessary and sufficient. `CELL_CMD=registry` prints the declaration as
+a `.reg` file and `CELL_CMD=registry-clean` deletes the declared keys;
+grant-only keys belong to someone else and stay.
+
+What this does not do: `HKLM` (needs administrator), `HKCR` (write
+`HKCU\Software\Classes` instead), deletions, and hiding the rest of the
+registry from the app. A build-time capture (a diff of `HKCU` around an
+installer run) can feed the same block later.
+
+### 16.6 Not done, in order
+
+1. **Build-time capture.** `run` steps need a Windows build host: run the
    installer under the launcher with a scratch upper and freeze the upper
    into the app layer. This is the ThinApp and Cameyo capture, declarative.
-3. Desktop and Steam integration, the PE icon resource, Authenticode
+2. Desktop and Steam integration, the PE icon resource, Authenticode
    signing (unsigned EXEs with a large overlay trip SmartScreen), 32-bit
    and ARM64 launchers.
 
-### 16.6 Licence note
+### 16.7 Licence note
 
 WinFsp is GPLv3 with a FLOSS exception that allows linking the DLL and
 shipping the installer from software under a FLOSS licence, with a notice

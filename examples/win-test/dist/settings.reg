@@ -1,0 +1,11 @@
+Windows Registry Editor Version 5.00
+
+; Imported by cell.wcl: values the test reads back from the real HKCU.
+[HKEY_CURRENT_USER\Software\CellTest\Imported]
+"Greeting"="hello \"cell\""
+"Level"=dword:00000007
+"Big"=hex(b):ff,ff,ff,ff,00,00,00,00
+"Blob"=hex:01,02,\
+  03
+"Path"=hex(2):25,00,41,00,50,00,50,00,44,00,41,00,54,00,41,00,25,00,00,00
+"List"=hex(7):61,00,00,00,62,00,63,00,00,00,00,00

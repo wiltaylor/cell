@@ -463,10 +463,36 @@ without a reboot. Until then the launcher notices, says so, and runs the
 sandboxed app from an extracted copy instead, so the boundary never
 silently drops.
 
+**The registry.** There is no virtual hive: the app reads and writes the
+user's real `HKEY_CURRENT_USER`, and a cell declares the keys it needs.
+The launcher creates them before the app starts and gives the container
+access to them; every other key stays read-only or invisible to it.
+
+```wcl
+registry {
+  import = "./settings.reg"                 # a regedit export, HKCU keys only
+  grant  = ["HKCU/Software/Vendor/Shared"]  # reachable, nothing written
+  key "HKCU/Software/Vendor/Game" {
+    value "@"          { string = "Game" }
+    value "InstallDir" { string = "$CELL_ROOT/app/game" }
+    value "Fullscreen" { dword  = 0 }
+    value "Mods"       { strings = ["base", "extra"] }
+  }
+}
+```
+
+A value is written when it is missing, so the user's later changes
+survive; a value that names `$CELL_ROOT` is rewritten at every start,
+because the mounted root can move. Types are `string`, `expand`
+(`REG_EXPAND_SZ`), `dword`, `qword`, `hex` (binary) and `strings`
+(`REG_MULTI_SZ`); `"@"` is a key's default value. A `.reg` import takes
+regedit's UTF-16 or a UTF-8 file, every type above, and refuses
+deletions and keys outside `HKCU`. `CELL_CMD=registry` prints the
+declaration as a `.reg` file, and `CELL_CMD=registry-clean` removes the
+declared keys again.
+
 What a Windows cell does not have yet, in order of likely arrival:
 
-- **A virtual registry.** The app reads and writes the real `HKCU`, and
-  inside the container only the keys the container may reach.
 - **`run` build steps.** The build tool runs on Linux, so a Windows
   installer cannot execute during a build; `copy` the installed files.
 - Desktop and Steam integration (`CELL_CMD=install`, `steam-add`), the PE
@@ -475,7 +501,8 @@ What a Windows cell does not have yet, in order of likely arrival:
 The build tool rejects names Windows cannot hold (`:`, `?`, `CON`, trailing
 dots) and files that differ only in case. `examples/win-test/` is a cell
 that tests the launcher from inside (file reads, copy-up, whiteouts,
-renames, memory mapping, DLL loading, a child process, the private home)
+renames, memory mapping, DLL loading, a child process, the private home,
+the declared registry keys)
 and `examples/wine-doom/cell-windows.wcl` packs Chocolate Doom's own Windows
 build. `lab/windows/` is a vmlab lab with a Windows 11 machine for running
 them; `just win-run win-test` copies a built example in and runs it.
@@ -568,7 +595,7 @@ WinFsp 2.x installed:
 
 | Example | Size | Result |
 | --- | --- | --- |
-| `win-test` | 12 MiB | All 17 checks pass inside the AppContainer through the WinFsp union volume, again with `CELL_TIER=extract`, and with `CELL_SANDBOX=off`: lower reads, case-insensitive lookup, a 16 MiB pattern read and memory-mapped, copy-up on append, whiteout on delete, mkdir and rename, DLL loading from the layer, a `:raw` data layer at `/assets`, a child `cmd` reading the layer, a writable private home, an AppContainer token, and a blocked network. Without the setup step the launcher falls back to the extracted copy and still passes. The mount point is gone after exit |
+| `win-test` | 12 MiB | All 21 checks pass inside the AppContainer through the WinFsp union volume, again with `CELL_TIER=extract`, and 19 with `CELL_SANDBOX=off`: lower reads, case-insensitive lookup, a 16 MiB pattern read and memory-mapped, copy-up on append, whiteout on delete, mkdir and rename, DLL loading from the layer, a `:raw` data layer at `/assets`, a child `cmd` reading the layer, a writable private home, an AppContainer token, a blocked network, the declared registry values of every type (inline and from a `.reg` import), a declared key that keeps a counter between runs, a grant-only key that is writable, and an undeclared key that the container cannot create. Without the setup step the launcher falls back to the extracted copy and still passes. The mount point is gone after exit |
 | `wine-doom` (`cell-windows.wcl`) | 63 MiB | Chocolate Doom's 32-bit Windows build runs Freedoom from the mounted volume, launched from the Run dialog; the mount is also visible to other sessions on the machine |
 
 ## How it works
@@ -639,12 +666,12 @@ packaged builder, the agent skill.
 Working on Windows: the `.cell.exe` format, the WinFsp union mount, the
 extract fallback, the AppContainer sandbox with `network` and `bind`
 grants, `CELL_CMD=setup`, `$CELL_ROOT`, the private home, the job object,
-the Windows name checks in the build tool.
+declared registry keys with `.reg` import and sandbox grants, the Windows
+name checks in the build tool.
 
 Planned:
 
-- Windows: a virtual registry, desktop and Steam integration, the PE
-  icon, signing
+- Windows: desktop and Steam integration, the PE icon, signing
 - seccomp filters and a filtered D-Bus proxy for portals
 - signing with ed25519 and a verification policy
 - fetching a missing referenced layer from a URL recorded in the manifest

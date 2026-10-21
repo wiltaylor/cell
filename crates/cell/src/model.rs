@@ -7,6 +7,7 @@ use cell_core::format::{
     Audio, Bind, BindMode, Dbus, Desktop, Display, Entry, Gpu, HomeMode, Input, Integration,
     Isolation, NamedCommand, NvidiaMode, PidMode, SandboxMode, Steam,
 };
+use cell_core::registry::{self, RegData, RegKey, RegValue, Registry as RegistryDecl};
 use wcl_lang::{disk_loader, Block, Document, Environment, Registry, Value};
 
 pub const SCHEMA: &str = include_str!("../../../schema/cell.wcl");
@@ -71,6 +72,8 @@ pub struct Plan {
     pub integration: Integration,
     pub desktop: Option<Desktop>,
     pub steam: Option<Steam>,
+    /// Windows only: declared `HKEY_CURRENT_USER` keys.
+    pub registry: RegistryDecl,
     pub root: PathBuf,
 }
 
@@ -140,6 +143,32 @@ fn symbol(b: &Block, name: &str) -> Result<Option<String>> {
         None => Ok(None),
         Some(Value::Symbol(s)) | Some(Value::Utf8(s)) | Some(Value::Identifier(s)) => Ok(Some(s)),
         Some(other) => bail!("`{name}` must be a symbol, got {other:?}"),
+    }
+}
+
+fn integer(b: &Block, name: &str) -> Result<Option<u64>> {
+    let v = match field_value(b, name)? {
+        None => return Ok(None),
+        Some(v) => v,
+    };
+    let n: Option<i128> = match v {
+        Value::I8(n) => Some(n as i128),
+        Value::I16(n) => Some(n as i128),
+        Value::I32(n) => Some(n as i128),
+        Value::I64(n) => Some(n as i128),
+        Value::I128(n) => Some(n),
+        Value::Isize(n) => Some(n as i128),
+        Value::U8(n) => Some(n as i128),
+        Value::U16(n) => Some(n as i128),
+        Value::U32(n) => Some(n as i128),
+        Value::U64(n) => Some(n as i128),
+        Value::U128(n) => i128::try_from(n).ok(),
+        Value::Usize(n) => Some(n as i128),
+        other => bail!("`{name}` must be an integer, got {other:?}"),
+    };
+    match n {
+        Some(n) if n >= 0 && n <= u64::MAX as i128 => Ok(Some(n as u64)),
+        _ => bail!("`{name}` must be between 0 and 2^64-1"),
     }
 }
 
@@ -259,6 +288,9 @@ pub fn plan(doc: &Document, root: &Path) -> Result<Plan> {
                 &mut plan.steam,
                 root,
             )?;
+        }
+        if let Some(r) = child(src, "registry") {
+            read_registry(&r, &mut plan.registry, root)?;
         }
     }
     if plan.runtime.base.is_empty() && !plan.is_windows() {
@@ -468,6 +500,82 @@ fn read_integration(
     Ok(())
 }
 
+/// The `registry` block: a `.reg` import first, then the inline keys on
+/// top, then the grant-only keys.
+fn read_registry(b: &Block, reg: &mut RegistryDecl, root: &Path) -> Result<()> {
+    if let Some(file) = string(b, "import")? {
+        let path = root.join(&file);
+        let bytes =
+            std::fs::read(&path).with_context(|| format!("registry.import: read {file}"))?;
+        let keys = registry::parse_reg(&registry::decode_reg(&bytes))
+            .with_context(|| format!("registry.import: {file}"))?;
+        for k in keys {
+            reg.add_key(k);
+        }
+    }
+    for k in children(b, "key") {
+        let path = registry::hkcu_subkey(&label(&k)?)?;
+        let mut values = Vec::new();
+        for v in children(&k, "value") {
+            let name = match label(&v)?.as_str() {
+                "@" => String::new(),
+                n => n.to_string(),
+            };
+            let mut data: Vec<RegData> = Vec::new();
+            if let Some(s) = string(&v, "string")? {
+                data.push(RegData::String(s));
+            }
+            if let Some(s) = string(&v, "expand")? {
+                data.push(RegData::Expand(s));
+            }
+            if let Some(n) = integer(&v, "dword")? {
+                let n = u32::try_from(n)
+                    .with_context(|| format!("value `{name}`: dword must fit in 32 bits"))?;
+                data.push(RegData::Dword(n));
+            }
+            if let Some(n) = integer(&v, "qword")? {
+                data.push(RegData::Qword(n));
+            }
+            if let Some(h) = string(&v, "hex")? {
+                let digits: String = h
+                    .chars()
+                    .filter(|c| !c.is_whitespace() && *c != ',')
+                    .collect();
+                if !digits.len().is_multiple_of(2) {
+                    bail!("value `{name}`: hex needs an even number of digits");
+                }
+                let bytes = (0..digits.len())
+                    .step_by(2)
+                    .map(|i| u8::from_str_radix(&digits[i..i + 2], 16))
+                    .collect::<std::result::Result<Vec<u8>, _>>()
+                    .with_context(|| format!("value `{name}`: hex has a non-hex digit"))?;
+                data.push(RegData::Binary(bytes));
+            }
+            if v.field("strings").is_some() {
+                data.push(RegData::Strings(string_list(&v, "strings")?));
+            }
+            if data.len() != 1 {
+                bail!(
+                    "registry key {path}: value `{}` needs exactly one of string, expand, dword, qword, hex or strings",
+                    if name.is_empty() { "@" } else { &name }
+                );
+            }
+            values.push(RegValue {
+                name,
+                data: data.pop().unwrap(),
+            });
+        }
+        reg.add_key(RegKey { path, values });
+    }
+    for g in string_list(b, "grant")? {
+        let path = registry::hkcu_subkey(&g)?;
+        if !reg.grants.iter().any(|p| p.eq_ignore_ascii_case(&path)) {
+            reg.grants.push(path);
+        }
+    }
+    Ok(())
+}
+
 /// Rules the schema cannot express.
 impl Plan {
     pub fn is_windows(&self) -> bool {
@@ -567,11 +675,16 @@ pub fn validate(plan: &Plan) -> Vec<String> {
         if plan.entry.gamescope {
             issues.push("os = windows: gamescope does not apply".into());
         }
-        if !plan.isolation.binds.is_empty() {
-            issues.push(
-                "os = windows: bind blocks are not implemented (no process sandbox yet)".into(),
-            );
+        for b in &plan.isolation.binds {
+            if b.mode == BindMode::Dev {
+                issues.push(format!(
+                    "os = windows: bind dev {} has no meaning; use ro or rw",
+                    b.host
+                ));
+            }
         }
+    } else if !plan.registry.is_empty() {
+        issues.push("registry: the block applies to Windows cells only (os = \"windows\")".into());
     }
     let has = |d: Display| plan.integration.display.contains(&d);
     if has(Display::X11Fallback) && !has(Display::Wayland) {

@@ -18,6 +18,11 @@ use windows_sys::Win32::Security::{GetTokenInformation, TokenIsAppContainer, TOK
 use windows_sys::Win32::System::Memory::{
     CreateFileMappingW, MapViewOfFile, UnmapViewOfFile, FILE_MAP_READ, PAGE_READONLY,
 };
+use windows_sys::Win32::System::Registry::{
+    RegCloseKey, RegCreateKeyExW, RegDeleteTreeW, RegOpenKeyExW, RegQueryValueExW,
+    RegSetValueExW, HKEY, HKEY_CURRENT_USER, KEY_ALL_ACCESS, KEY_READ, REG_DWORD, REG_EXPAND_SZ,
+    REG_SZ,
+};
 use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 
 struct T {
@@ -39,6 +44,79 @@ impl T {
 
 fn wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(std::iter::once(0)).collect()
+}
+
+/// A registry value under HKCU as (type, bytes), or the error code.
+fn reg_get(subkey: &str, name: &str) -> Result<(u32, Vec<u8>), u32> {
+    let k = wide(subkey);
+    let n = wide(name);
+    unsafe {
+        let mut h: HKEY = std::ptr::null_mut();
+        let rc = RegOpenKeyExW(HKEY_CURRENT_USER, k.as_ptr(), 0, KEY_READ, &mut h);
+        if rc != 0 {
+            return Err(rc);
+        }
+        let mut kind = 0u32;
+        let mut len = 0u32;
+        let rc = RegQueryValueExW(h, n.as_ptr(), std::ptr::null(), &mut kind, std::ptr::null_mut(), &mut len);
+        if rc != 0 {
+            RegCloseKey(h);
+            return Err(rc);
+        }
+        let mut buf = vec![0u8; len as usize];
+        let rc = RegQueryValueExW(h, n.as_ptr(), std::ptr::null(), &mut kind, buf.as_mut_ptr(), &mut len);
+        RegCloseKey(h);
+        if rc != 0 {
+            return Err(rc);
+        }
+        buf.truncate(len as usize);
+        Ok((kind, buf))
+    }
+}
+
+fn reg_string(subkey: &str, name: &str) -> Result<(u32, String), u32> {
+    let (kind, bytes) = reg_get(subkey, name)?;
+    let units: Vec<u16> = bytes.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
+    let end = units.iter().position(|&u| u == 0).unwrap_or(units.len());
+    Ok((kind, String::from_utf16_lossy(&units[..end])))
+}
+
+fn reg_dword(subkey: &str, name: &str) -> Result<u32, u32> {
+    let (kind, bytes) = reg_get(subkey, name)?;
+    if kind != REG_DWORD || bytes.len() != 4 {
+        return Err(u32::MAX);
+    }
+    Ok(u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
+}
+
+/// Create the key and set a REG_DWORD; the error code on failure.
+fn reg_set_dword(subkey: &str, name: &str, v: u32) -> Result<(), u32> {
+    let k = wide(subkey);
+    let n = wide(name);
+    unsafe {
+        let mut h: HKEY = std::ptr::null_mut();
+        let rc = RegCreateKeyExW(
+            HKEY_CURRENT_USER,
+            k.as_ptr(),
+            0,
+            std::ptr::null(),
+            0,
+            KEY_ALL_ACCESS,
+            std::ptr::null(),
+            &mut h,
+            std::ptr::null_mut(),
+        );
+        if rc != 0 {
+            return Err(rc);
+        }
+        let b = v.to_le_bytes();
+        let rc = RegSetValueExW(h, n.as_ptr(), 0, REG_DWORD, b.as_ptr(), 4);
+        RegCloseKey(h);
+        if rc != 0 {
+            return Err(rc);
+        }
+        Ok(())
+    }
 }
 
 fn names(dir: &Path) -> Vec<String> {
@@ -295,6 +373,70 @@ fn main() {
         t.check("network blocked in the container", blocked, || format!("{r:?} after {:?}", start.elapsed()));
     } else {
         println!("INFO network outside the sandbox: {:?} after {:?}", r.is_ok(), start.elapsed());
+    }
+
+    // 18. The declared registry keys: inline values and the .reg import,
+    // every type, with $CELL_ROOT expanded.
+    let key = "Software\\CellTest";
+    let imported = "Software\\CellTest\\Imported";
+    let want_dir = format!("{}/app", root.display());
+    let install = reg_string(key, "InstallDir");
+    let default = reg_string(key, "");
+    let full = reg_dword(key, "Fullscreen");
+    let greeting = reg_string(imported, "Greeting");
+    let level = reg_dword(imported, "Level");
+    let big = reg_get(imported, "Big");
+    let blob = reg_get(imported, "Blob");
+    let path = reg_string(imported, "Path");
+    let list = reg_get(imported, "List");
+    let seeded_ok = install.as_ref().ok() == Some(&(REG_SZ, want_dir.clone()))
+        && default.as_ref().ok() == Some(&(REG_SZ, "default".to_string()))
+        && full == Ok(0)
+        && greeting.as_ref().ok() == Some(&(REG_SZ, "hello \"cell\"".to_string()))
+        && level == Ok(7)
+        && big.as_ref().ok().map(|(_, b)| b.as_slice()) == Some(&[0xff, 0xff, 0xff, 0xff, 0, 0, 0, 0])
+        && blob.as_ref().ok().map(|(_, b)| b.as_slice()) == Some(&[1, 2, 3])
+        && path.as_ref().ok() == Some(&(REG_EXPAND_SZ, "%APPDATA%".to_string()))
+        && list.as_ref().ok().map(|(k, b)| (*k, b.len())) == Some((7, 12));
+    t.check("declared registry values are present", seeded_ok, || {
+        format!(
+            "InstallDir={install:?} (want {want_dir}) default={default:?} Fullscreen={full:?} \
+             Greeting={greeting:?} Level={level:?} Big={big:?} Blob={blob:?} Path={path:?} List={list:?}"
+        )
+    });
+
+    // 19. A declared key is writable and keeps its values between runs.
+    let runs = reg_dword(key, "Runs").unwrap_or(0);
+    let wrote = reg_set_dword(key, "Runs", runs + 1);
+    let back = reg_dword(key, "Runs");
+    println!("registry runs so far: {}", back.clone().unwrap_or(0));
+    t.check(
+        "declared registry key is writable",
+        wrote.is_ok() && back == Ok(runs + 1),
+        || format!("write={wrote:?} read={back:?}"),
+    );
+
+    // 20. A grant-only key is writable too.
+    let shared = reg_set_dword("Software\\CellTestShared", "Seen", 1);
+    t.check("granted registry key is writable", shared.is_ok(), || {
+        format!("{shared:?}")
+    });
+
+    // 21. A key the cell did not declare: blocked in the container, open
+    // outside it (and removed again so the test leaves nothing behind).
+    let denied = reg_set_dword("Software\\CellTestDenied", "x", 1);
+    if want_container {
+        t.check(
+            "undeclared registry key is blocked in the container",
+            denied == Err(5),
+            || format!("{denied:?}"),
+        );
+    } else {
+        println!("INFO undeclared registry key outside the sandbox: {denied:?}");
+    }
+    if denied.is_ok() {
+        let k = wide("Software\\CellTestDenied");
+        unsafe { RegDeleteTreeW(HKEY_CURRENT_USER, k.as_ptr()) };
     }
 
     println!("{} passed, {} failed", t.passed, t.failed);

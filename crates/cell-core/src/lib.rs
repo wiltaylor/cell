@@ -20,6 +20,7 @@ pub mod host;
 #[cfg(target_os = "linux")]
 pub mod nvidia_fetch;
 pub mod pread;
+pub mod registry;
 #[cfg(target_os = "linux")]
 pub mod sandbox;
 pub mod squashfs;

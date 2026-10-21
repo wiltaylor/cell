@@ -38,5 +38,8 @@ need braces even when empty: `run "cmd" { }`.
 | `integration.gpu { enable, nvidia, vaapi }` | block | enable true, nvidia `:auto` | `/dev/dri` plus NVIDIA strategy `:auto`, `:fetch`, `:host`, `:off` |
 | `integration.desktop { icon, comment, categories, mime, protocols, keywords }` | block | — | Desktop entry data; `protocols` are URL schemes the cell handles (`x-scheme-handler/<scheme>`); `CELL_CMD=install` writes it out |
 | `integration.steam { portrait, wide, hero, logo, tags, launch_options }` | block | — | Steam library art (PNG, 600x900, 920x430, 1920x620, transparent logo) and shortcut options; `CELL_CMD=steam-add` uses it |
+| `registry.import` | utf8 | — | Windows only. A `.reg` file (regedit UTF-16 or UTF-8), relative to the build file; its `HKEY_CURRENT_USER` keys are written before the app starts. Deletions and other hives are rejected |
+| `registry.grant` | list<utf8> | — | Windows only. Keys under `HKCU` the sandbox may read and write, nothing written; `"HKCU/Software/Vendor/Shared"` |
+| `registry.key "<HKCU/path>" { value "<name>" { ... } }` | block | — | Windows only. A key to create; `HKCU/...` or `HKEY_CURRENT_USER\...`. Each `value` sets exactly one of `string`, `expand` (REG_EXPAND_SZ), `dword`, `qword`, `hex` (binary, `"00ff"`) or `strings` (REG_MULTI_SZ); `"@"` is the default value. A value is written when missing, or at every start when it names `$CELL_ROOT`. With the sandbox on the container gets an ACE on every declared key; undeclared keys under `HKCU` stay read-only to it |
 
 Reserved word: `none` cannot be a symbol. The schema uses `:raw` and `:off` instead.

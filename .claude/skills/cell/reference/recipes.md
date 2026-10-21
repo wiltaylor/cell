@@ -202,6 +202,25 @@ so. `sandbox = :off` in the `isolation` block turns the container off for apps t
 cannot live in one. The build tool rejects file names Windows cannot hold and names
 that differ only in case.
 
+An app that keeps settings in the registry declares its keys; the container cannot
+create keys under `HKCU` on its own. The launcher writes them before the start and
+grants the container access:
+
+```wcl
+  registry {
+    import = "./settings.reg"                    # optional regedit export, HKCU only
+    key "HKCU/Software/Example/Game" {
+      value "InstallDir" { string = "$CELL_ROOT/app/game" }   # rewritten at every start
+      value "Fullscreen" { dword  = 0 }                       # written once
+    }
+    grant = ["HKCU/Software/Example/Shared"]     # reachable, nothing written
+  }
+```
+
+`CELL_CMD=registry` prints what a cell declares as a `.reg` file; `CELL_CMD=registry-clean`
+removes the declared keys. There is no virtual registry: the app reads and writes the
+real `HKEY_CURRENT_USER`.
+
 ## Sharing one runtime between many games
 
 Give each game the same `runtime` block (same base, packages, setup, multilib) and

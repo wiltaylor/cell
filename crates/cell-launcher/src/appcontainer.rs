@@ -26,7 +26,7 @@ use windows_sys::Win32::Foundation::{
 use windows_sys::Win32::Security::Authorization::{
     ConvertStringSecurityDescriptorToSecurityDescriptorW, GetNamedSecurityInfoW, SetEntriesInAclW,
     SetNamedSecurityInfoW, EXPLICIT_ACCESS_W, GRANT_ACCESS, SDDL_REVISION_1, SE_FILE_OBJECT,
-    TRUSTEE_IS_SID, TRUSTEE_IS_UNKNOWN, TRUSTEE_W,
+    SE_OBJECT_TYPE, SE_REGISTRY_KEY, TRUSTEE_IS_SID, TRUSTEE_IS_UNKNOWN, TRUSTEE_W,
 };
 use windows_sys::Win32::Security::Isolation::{
     CreateAppContainerProfile, DeriveAppContainerSidFromAppContainerName,
@@ -170,14 +170,38 @@ pub fn capabilities(network: bool) -> Result<Vec<Sid>> {
 /// Add an inheritable ACE for `sid` on `path`. `full` grants everything,
 /// otherwise read and execute.
 pub fn grant(path: &Path, sid: &Sid, full: bool) -> Result<()> {
-    let name = wide(&path.to_string_lossy());
+    // SUB_CONTAINERS_AND_OBJECTS_INHERIT
+    grant_object(&path.to_string_lossy(), SE_FILE_OBJECT, sid, full, 3)
+}
+
+/// Add an ACE for the container on a registry key under
+/// `HKEY_CURRENT_USER`; subkeys inherit it.
+pub fn grant_key(subkey: &str, sid: &Sid, full: bool) -> Result<()> {
+    // SUB_CONTAINERS_ONLY_INHERIT: a key holds keys, nothing else.
+    grant_object(
+        &format!("CURRENT_USER\\{subkey}"),
+        SE_REGISTRY_KEY,
+        sid,
+        full,
+        2,
+    )
+}
+
+fn grant_object(
+    object: &str,
+    kind: SE_OBJECT_TYPE,
+    sid: &Sid,
+    full: bool,
+    inheritance: u32,
+) -> Result<()> {
+    let name = wide(object);
     let mut old_dacl: *mut ACL = std::ptr::null_mut();
     let mut sd: *mut c_void = std::ptr::null_mut();
     // SAFETY: valid pointers; the SD and the new ACL are freed below.
     unsafe {
         let rc = GetNamedSecurityInfoW(
             name.as_ptr(),
-            SE_FILE_OBJECT,
+            kind,
             DACL_SECURITY_INFORMATION,
             std::ptr::null_mut(),
             std::ptr::null_mut(),
@@ -186,7 +210,7 @@ pub fn grant(path: &Path, sid: &Sid, full: bool) -> Result<()> {
             &mut sd,
         );
         if rc != 0 {
-            bail!("GetNamedSecurityInfo({}): {rc}", path.display());
+            bail!("GetNamedSecurityInfo({object}): {rc}");
         }
         let ea = EXPLICIT_ACCESS_W {
             grfAccessPermissions: if full {
@@ -195,7 +219,7 @@ pub fn grant(path: &Path, sid: &Sid, full: bool) -> Result<()> {
                 GENERIC_READ | GENERIC_EXECUTE
             },
             grfAccessMode: GRANT_ACCESS,
-            grfInheritance: 3, // SUB_CONTAINERS_AND_OBJECTS_INHERIT
+            grfInheritance: inheritance,
             Trustee: TRUSTEE_W {
                 pMultipleTrustee: std::ptr::null_mut(),
                 MultipleTrusteeOperation: 0,
@@ -208,11 +232,11 @@ pub fn grant(path: &Path, sid: &Sid, full: bool) -> Result<()> {
         let rc = SetEntriesInAclW(1, &ea, old_dacl, &mut new_dacl);
         if rc != 0 {
             LocalFree(sd as _);
-            bail!("SetEntriesInAcl({}): {rc}", path.display());
+            bail!("SetEntriesInAcl({object}): {rc}");
         }
         let rc = SetNamedSecurityInfoW(
             name.as_ptr() as *mut u16,
-            SE_FILE_OBJECT,
+            kind,
             DACL_SECURITY_INFORMATION,
             std::ptr::null_mut(),
             std::ptr::null_mut(),
@@ -222,7 +246,7 @@ pub fn grant(path: &Path, sid: &Sid, full: bool) -> Result<()> {
         LocalFree(new_dacl as _);
         LocalFree(sd as _);
         if rc != 0 {
-            bail!("SetNamedSecurityInfo({}): {rc}", path.display());
+            bail!("SetNamedSecurityInfo({object}): {rc}");
         }
     }
     Ok(())

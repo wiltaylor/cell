@@ -36,4 +36,14 @@ app "dev.wiltaylor.win-test" {
     network = false
     home    = :private
   }
+
+  registry {
+    import = "./dist/settings.reg"
+    grant  = ["HKCU/Software/CellTestShared"]
+    key "HKCU/Software/CellTest" {
+      value "@"          { string = "default" }
+      value "InstallDir" { string = "$CELL_ROOT/app" }
+      value "Fullscreen" { dword  = 0 }
+    }
+  }
 }

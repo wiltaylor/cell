@@ -23,6 +23,8 @@ mod grants;
 #[cfg(target_os = "linux")]
 mod linux;
 #[cfg(windows)]
+mod registry;
+#[cfg(windows)]
 mod setup;
 #[cfg(target_os = "linux")]
 mod steam;

@@ -317,6 +317,10 @@ pub struct Manifest {
     pub isolation: Isolation,
     pub integration: Integration,
     pub layers: Vec<LayerMeta>,
+    /// Windows only: the `HKEY_CURRENT_USER` keys the launcher seeds and
+    /// the sandbox may reach. Older manifests have none.
+    #[serde(default)]
+    pub registry: crate::registry::Registry,
 }
 
 impl Manifest {

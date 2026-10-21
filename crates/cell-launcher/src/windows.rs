@@ -50,8 +50,13 @@ enum Tier {
     Extract,
 }
 
+/// A launcher variable, with the trailing space a `set X=y && ...` line
+/// in cmd leaves behind removed.
 fn env(k: &str) -> Option<String> {
-    std::env::var(k).ok().filter(|v| !v.is_empty())
+    std::env::var(k)
+        .ok()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
 }
 
 /// `CELL_DEBUG=1`: trace the launcher's steps to stderr and to
@@ -336,6 +341,26 @@ pub fn real_main() -> Result<i32> {
             println!("{:#?}", m);
             return Ok(0);
         }
+        "registry" => {
+            if m.registry.is_empty() {
+                println!("; {} declares no registry keys", m.app.id);
+                return Ok(0);
+            }
+            print!(
+                "; the keys {} writes before it starts; $CELL_ROOT is the mounted root\r\n{}",
+                m.app.id,
+                m.registry.to_reg(|s| s.to_string())
+            );
+            for g in &m.registry.grants {
+                println!("; the sandbox may also use HKEY_CURRENT_USER\\{g}");
+            }
+            return Ok(0);
+        }
+        "registry-clean" => {
+            let n = crate::registry::clean(&m.registry)?;
+            println!("cell: removed {n} registry key(s) of {}", m.app.id);
+            return Ok(0);
+        }
         "install" | "uninstall" | "steam-add" | "steam-remove" | "steam-list" | "desktop-entry" => {
             bail!("CELL_CMD={cmd} is not implemented on Windows yet");
         }
@@ -385,6 +410,9 @@ pub fn real_main() -> Result<i32> {
             );
         }
         println!("home: {:?}", m.isolation.home);
+        for line in cell_core::registry::describe(&m.registry) {
+            println!("registry: {line}");
+        }
         match sandbox {
             SandboxMode::AppContainer => {
                 println!(
@@ -505,6 +533,13 @@ pub fn real_main() -> Result<i32> {
 
     trace(&format!("root ready at {}", root.display()));
     let pwd = std::env::current_dir().unwrap_or_else(|_| root.clone());
+    if !m.registry.is_empty() {
+        let n = crate::registry::apply(&m.registry, |s| expand(s, &root, &pwd))?;
+        if let Some((sid, _)) = &container {
+            crate::registry::grant_all(&m.registry, sid)?;
+        }
+        trace(&format!("registry: {n} value(s) written"));
+    }
     let program = if exec[0].starts_with('/') {
         host_path(&root, &exec[0])
     } else {

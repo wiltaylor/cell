@@ -590,6 +590,7 @@ fn assemble(
             i
         },
         layers,
+        registry: plan.registry.clone(),
     };
     let cbor = manifest.to_cbor()?;
     let manifest_off = out.stream_position()?;
@@ -632,6 +633,9 @@ pub fn inspect(path: &Path) -> Result<()> {
     }
     println!("entry: {:?}", m.entry.exec);
     println!("isolation: {:?}", m.isolation);
+    for line in cell_core::registry::describe(&m.registry) {
+        println!("registry: {line}");
+    }
     println!(
         "integration: display={:?} audio={:?} input={:?} dbus={:?} gpu={:?}",
         m.integration.display,
