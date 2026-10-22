@@ -590,7 +590,10 @@ mod tests {
     }
 
     fn check_unpacked(dir: &Path, payload: Vec<u8>) {
-        let (tmp, run) = fake_run("x", &payload);
+        // One run file per test: the tests run in parallel and must not
+        // share a directory.
+        let name = format!("run-{}", dir.file_name().unwrap().to_string_lossy());
+        let (tmp, run) = fake_run(&name, &payload);
         let out = FetchedDriver {
             version: "1".into(),
             dir: dir.to_path_buf(),
