@@ -591,6 +591,7 @@ fn assemble(
         },
         layers,
         registry: plan.registry.clone(),
+        wine: plan.wine.clone(),
     };
     let cbor = manifest.to_cbor()?;
     let manifest_off = out.stream_position()?;
@@ -635,6 +636,9 @@ pub fn inspect(path: &Path) -> Result<()> {
     println!("isolation: {:?}", m.isolation);
     for line in cell_core::registry::describe(&m.registry) {
         println!("registry: {line}");
+    }
+    if let Some(w) = &m.wine {
+        println!("wine: runs Windows cells through {:?}", w.command);
     }
     println!(
         "integration: display={:?} audio={:?} input={:?} dbus={:?} gpu={:?}",

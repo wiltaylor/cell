@@ -1,6 +1,6 @@
 ---
 name: cell
-description: Builds, runs and debugs Cell portable applications (.cell files for Linux, .cell.exe for Windows) from cell.wcl build files, with the packaged cell-builder.cell or the cell tool. Use when the user wants to package an app, game or CLI tool as a .cell, write or fix a cell.wcl, make a Windows cell (os = "windows") or declare its registry keys, choose grants (display, audio, GPU, gamepads, network, home), share a runtime layer between cells, or work out why a .cell does not start, has no window, no sound or no GPU.
+description: Builds, runs and debugs Cell portable applications (.cell files for Linux, .cell.exe for Windows) from cell.wcl build files, with the packaged cell-builder.cell or the cell tool. Use when the user wants to package an app, game or CLI tool as a .cell, write or fix a cell.wcl, make a Windows cell (os = "windows") or declare its registry keys, run a Windows cell on Linux through a Wine runner, choose grants (display, audio, GPU, gamepads, network, home), share a runtime layer between cells, or work out why a .cell does not start, has no window, no sound or no GPU.
 user-invocable: true
 argument-hint: <help|new|build|run|debug> [args...]
 allowed-tools:

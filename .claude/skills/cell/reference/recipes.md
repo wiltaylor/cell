@@ -221,6 +221,70 @@ grants the container access:
 removes the declared keys. There is no virtual registry: the app reads and writes the
 real `HKEY_CURRENT_USER`.
 
+## wine-runner: run a Windows cell on Linux
+
+A Linux cell with a `wine` block runs any Windows cell given as its first argument:
+`./wine.cell game.cell.exe`. Build one runner and reuse it for every `.cell.exe`.
+The runtime is the one from the wine-game recipe; the Windows cell supplies the
+files, the entry point and the registry keys, and keeps its own prefix and saves.
+
+```wcl
+import <cell.wcl>
+
+app "dev.example.wine" {
+  name    = "Wine runner"
+  version = "1.0"
+
+  runtime {
+    base     = "oci://archlinux:base"
+    multilib = true
+    packages = ["wine", "wine-mono", /* the wine-game list */ ]
+  }
+
+  wine { command = ["wine"] }
+
+  entry {
+    exec = ["wine", "--version"]              // what runs with no Windows cell given
+    env "WINEDEBUG" { value = "-all" }
+    command "winecfg" { exec = ["wine", "winecfg"] }
+  }
+
+  isolation { network = true home = :private } // network: the cap; the guest decides
+  integration {
+    display = [:x11, :wayland]
+    audio   = [:pipewire, :pulse]
+    input   = [:gamepad]
+    fonts   = true
+    gpu { enable = true }
+  }
+}
+```
+
+`CELL_COMMAND=winecfg ./wine.cell game.cell.exe` configures that game's prefix.
+`CELL_CMD=install` does not support a wrapped run yet.
+
+For Proton, copy a GE-Proton release in and point `command` at a script, because
+`proton run` needs three variables; `examples/proton/` in the Cell repository is a
+complete runner with its `fetch-assets.sh`:
+
+```wcl
+  runtime { base = "oci://archlinux:base" multilib = true packages = ["python", /* graphics, audio, lib32 */ ] }
+  build {
+    copy { from = "./dist/proton" to = "/opt/proton" }
+    copy { from = "./proton-run"  to = "/usr/local/bin/proton-run" }
+  }
+  wine { command = ["proton-run"] }
+```
+
+```sh
+#!/bin/sh
+export STEAM_COMPAT_DATA_PATH="$HOME/proton"
+export STEAM_COMPAT_CLIENT_INSTALL_PATH="$HOME/steam"
+export UMU_ID="umu-default"     # no Steam client; without it Proton exits 1
+mkdir -p "$STEAM_COMPAT_DATA_PATH" "$STEAM_COMPAT_CLIENT_INSTALL_PATH"
+exec /opt/proton/proton run "$@"
+```
+
 ## Sharing one runtime between many games
 
 Give each game the same `runtime` block (same base, packages, setup, multilib) and

@@ -65,6 +65,10 @@ pub struct Spec {
     /// Commands run inside the new root before `exec`, in order. A failure
     /// is reported but does not stop the launch.
     pub pre_exec: Vec<Vec<String>>,
+    /// Commands run as the application's user, after the uid drop and in
+    /// its working directory, before `exec`. A failure is reported but
+    /// does not stop the launch.
+    pub user_pre_exec: Vec<Vec<String>>,
     /// File binds done after `pivot_root` (source, destination), both inside
     /// the root. Used for the regenerated `ld.so.cache`.
     pub late_file_binds: Vec<(String, String)>,
@@ -623,6 +627,11 @@ fn child(spec: &Spec, root: &Path) -> Result<i32> {
     if let Some(c) = &spec.cwd {
         if let Err(e) = chdir(Path::new(c)) {
             eprintln!("cell: warning: {e}");
+        }
+    }
+    for cmd in &spec.user_pre_exec {
+        if let Err(e) = run_wait(cmd, &env) {
+            eprintln!("cell: warning: {}: {e}", cmd.join(" "));
         }
     }
     unsafe {

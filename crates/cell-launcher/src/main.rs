@@ -30,6 +30,8 @@ mod setup;
 mod steam;
 #[cfg(windows)]
 mod windows;
+#[cfg(target_os = "linux")]
+mod wine;
 
 mod common;
 

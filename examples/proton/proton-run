@@ -1,0 +1,13 @@
+#!/bin/sh
+# Run a Windows program through GE-Proton outside Steam. Proton wants two
+# directories named before it starts; both live in the cell's home, so
+# every Windows cell keeps its own prefix. UMU_ID tells Proton there is
+# no Steam client: without it, every program goes through steam.exe and
+# fails. The launcher puts this command in front of the program path and
+# its arguments.
+set -e
+export STEAM_COMPAT_DATA_PATH="${STEAM_COMPAT_DATA_PATH:-$HOME/proton}"
+export STEAM_COMPAT_CLIENT_INSTALL_PATH="${STEAM_COMPAT_CLIENT_INSTALL_PATH:-$HOME/steam}"
+export UMU_ID="${UMU_ID:-umu-default}"
+mkdir -p "$STEAM_COMPAT_DATA_PATH" "$STEAM_COMPAT_CLIENT_INSTALL_PATH"
+exec /opt/proton/proton run "$@"

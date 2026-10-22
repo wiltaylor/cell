@@ -1,0 +1,57 @@
+// A GE-Proton runner: a Linux cell that runs Windows cells through
+// Proton, with DXVK and VKD3D for Direct3D over Vulkan.
+//
+//   ./fetch-assets.sh                       # GE-Proton into dist/proton
+//   cell build cell.wcl -o ../dist/proton.cell
+//   ./proton.cell game.cell.exe [args]
+//
+// `proton-run` sets the two directories Proton wants and execs
+// `proton run`; the prefix lands in the Windows cell's private home.
+
+import <cell.wcl>
+
+app "dev.wiltaylor.proton" {
+  name    = "GE-Proton runner"
+  version = "0.1.0"
+
+  runtime {
+    base     = "oci://archlinux:base"
+    multilib = true
+    packages = [
+      "python",
+      "mesa", "lib32-mesa", "vulkan-icd-loader", "lib32-vulkan-icd-loader",
+      "vulkan-intel", "lib32-vulkan-intel", "vulkan-radeon", "lib32-vulkan-radeon",
+      "libpulse", "lib32-libpulse", "pipewire", "lib32-pipewire", "lib32-alsa-plugins",
+      "lib32-gnutls", "lib32-libxcomposite", "lib32-libxinerama", "lib32-libxrandr",
+      "lib32-libxcursor", "lib32-libxi", "lib32-libxkbcommon",
+      "freetype2", "lib32-freetype2", "fontconfig", "lib32-fontconfig",
+      "ttf-dejavu", "mesa-utils", "vulkan-tools",
+    ]
+  }
+
+  build {
+    copy { from = "./dist/proton" to = "/opt/proton" }
+    copy { from = "./proton-run"  to = "/usr/local/bin/proton-run" }
+  }
+
+  wine { command = ["proton-run"] }
+
+  entry {
+    exec = ["sh", "-c", "cat /opt/proton/version; echo 'usage: proton.cell <app.cell.exe> [args]'"]
+    command "winecfg" { exec = ["proton-run", "winecfg"] }
+    command "glxinfo" { exec = ["glxinfo", "-B"] }
+  }
+
+  isolation {
+    network = true   // the Windows cell decides; this is the cap
+    home    = :private
+  }
+
+  integration {
+    display = [:x11, :wayland]
+    audio   = [:pipewire, :pulse]
+    input   = [:gamepad]
+    fonts   = true
+    gpu { enable = true nvidia = :auto }
+  }
+}

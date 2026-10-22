@@ -1,0 +1,54 @@
+// A generic Wine runner: a Linux cell that runs Windows cells.
+//
+//   cell build cell.wcl -o ../dist/wine.cell
+//   ./wine.cell game.cell.exe [args]
+//
+// The Windows cell's layers join this cell's root, its entry point runs
+// through Wine with $CELL_ROOT as Z:\, its registry keys go into the
+// prefix, and its state (saves, prefix, upper) is kept under its own id.
+// Without an argument the cell prints Wine's version; CELL_COMMAND=winecfg
+// opens the configuration of the prefix of the cell named after it.
+
+import <cell.wcl>
+
+app "dev.wiltaylor.wine" {
+  name    = "Wine runner"
+  version = "0.1.0"
+
+  runtime {
+    base     = "oci://archlinux:base"
+    multilib = true
+    packages = [
+      "wine", "wine-mono", "wine-gecko",
+      "mesa", "lib32-mesa", "vulkan-icd-loader", "lib32-vulkan-icd-loader",
+      "vulkan-intel", "lib32-vulkan-intel", "vulkan-radeon", "lib32-vulkan-radeon",
+      "libpulse", "lib32-libpulse", "pipewire", "lib32-pipewire",
+      "lib32-gnutls", "lib32-libxcomposite", "lib32-libxinerama", "lib32-libxrandr",
+      "lib32-libxcursor", "lib32-libxi", "lib32-alsa-plugins",
+      "ttf-dejavu", "mesa-utils", "vulkan-tools",
+    ]
+  }
+
+  wine { command = ["wine"] }
+
+  entry {
+    exec = ["wine", "--version"]
+    env "WINEDEBUG" { value = "-all" }
+    command "winecfg"  { exec = ["wine", "winecfg"] }
+    command "winemine" { exec = ["wine", "winemine"] }
+    command "glxinfo"  { exec = ["glxinfo", "-B"] }
+  }
+
+  isolation {
+    network = true   // the Windows cell decides; this is the cap
+    home    = :private
+  }
+
+  integration {
+    display = [:x11, :wayland]
+    audio   = [:pipewire, :pulse]
+    input   = [:gamepad]
+    fonts   = true
+    gpu { enable = true nvidia = :auto }
+  }
+}

@@ -42,10 +42,12 @@ fn find_launcher(explicit: Option<PathBuf>, windows: bool) -> Result<PathBuf> {
             dir.join("../../x86_64-pc-windows-gnu/release/cell-launcher.exe"),
         ]
     } else {
+        // The musl build first: a `cargo build --workspace` leaves a glibc
+        // launcher beside the tool, which is not the one to ship.
         [
-            dir.join("cell-launcher"),
             dir.join("../x86_64-unknown-linux-musl/release/cell-launcher"),
             dir.join("../../x86_64-unknown-linux-musl/release/cell-launcher"),
+            dir.join("cell-launcher"),
         ]
     };
     for c in candidates {

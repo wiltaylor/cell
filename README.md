@@ -507,6 +507,31 @@ and `examples/wine-doom/cell-windows.wcl` packs Chocolate Doom's own Windows
 build. `lab/windows/` is a vmlab lab with a Windows 11 machine for running
 them; `just win-run win-test` copies a built example in and runs it.
 
+**Running a Windows cell on Linux.** A Linux cell with a `wine` block is a
+runner: give it a Windows cell as the first argument and it runs that cell
+through Wine.
+
+```
+./wine.cell game.cell.exe            # the Windows cell's entry, under Wine
+./wine.cell game.cell.exe -window    # extra arguments go to the game
+CELL_COMMAND=winecfg ./wine.cell game.cell.exe   # the runner's own commands
+```
+
+The runner's build file holds the runtime (Wine and its libraries), the
+grants and the host integration. `wine { command = ["wine"] }` names the
+command that runs a Windows program, so a runner can be any Wine:
+`examples/wine/cell.wcl` packs Arch's Wine, and `examples/proton/cell.wcl`
+packs a GE-Proton release with a `proton-run` script that sets the
+directories Proton wants and tells it there is no Steam client
+(`UMU_ID`), with DXVK and VKD3D for Direct3D over Vulkan. The Windows cell's layers join the runner's root below the
+upper, so the app sees its files at `/app/...`, which Wine shows as
+`Z:\app\...`; `$CELL_ROOT` expands to `Z:\`. Its registry keys go into
+the prefix with `regedit /S` once per declaration, and its saves, upper
+and Wine prefix live under its own id, so a game keeps its state
+whichever runner starts it. The guest's `network` is honoured when the
+runner allows the network too; `home` follows the guest. The same
+`.cell.exe` runs natively on Windows and through the runner on Linux.
+
 ## Cell Hub and Cell Launcher
 
 The server side and the desktop library live in their own repository,
@@ -589,6 +614,8 @@ Wayland, Intel Iris Xe plus an NVIDIA RTX 4060 on driver 615.71.09:
 | `wine-doom` | 767 MiB | Wine prefix created on first run; Minesweeper and Chocolate Doom (Freedoom) run through Wine with wined3d and DirectSound audio |
 | `cell-builder` | 12 MiB | The build tool itself; built `gl-tools` and a fresh Arch runtime with pacman from inside its own sandbox |
 | `openttd` | 4 MiB + 258 MiB runtime | OpenTTD client as the entry point and `command "server"` for the dedicated server, which Cell Hub can host |
+| `wine` | 832 MiB | A Wine runner: `wine.cell win-test.cell.exe` passes 19 of 19 checks of the Windows test cell under Wine, registry keys included, and `wine.cell win-doom.cell.exe` runs Chocolate Doom's Windows build with the Freedoom data layer |
+| `proton` | 855 MiB | A GE-Proton 11-11 runner (`fetch-assets.sh` downloads it): the same 19 of 19 checks and the same Doom run through Proton, with its own prefix beside the Wine one in the game's home |
 
 Windows, tested on 2026-10-21 on a Windows 11 24H2 (26100) vmlab machine with
 WinFsp 2.x installed:
@@ -664,7 +691,7 @@ sidecar and referenced placement, named commands, instance locking, the
 packaged builder, the agent skill.
 
 Working on Windows: the `.cell.exe` format, the WinFsp union mount, the
-extract fallback, the AppContainer sandbox with `network` and `bind`
+extract fallback, the Wine runner that runs a `.cell.exe` on Linux, the AppContainer sandbox with `network` and `bind`
 grants, `CELL_CMD=setup`, `$CELL_ROOT`, the private home, the job object,
 declared registry keys with `.reg` import and sandbox grants, the Windows
 name checks in the build tool.

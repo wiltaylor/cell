@@ -50,6 +50,7 @@ type App {
   @child("isolation")   isolation:   Isolation?
   @child("integration") integration: Integration?
   @child("registry")    registry:    RegistryDecl?
+  @child("wine")        wine:        Wine?
 }
 
 @block("template")
@@ -61,6 +62,7 @@ type Template {
   @child("isolation")   isolation:   Isolation?
   @child("integration") integration: Integration?
   @child("registry")    registry:    RegistryDecl?
+  @child("wine")        wine:        Wine?
 }
 
 @block("runtime")
@@ -167,6 +169,12 @@ type Integration {
   @child("gpu")     gpu:     Gpu?
   @child("desktop") desktop: DesktopEntry?
   @child("steam")   steam:   SteamEntry?
+}
+
+@block("wine")
+type Wine {
+  @doc("Linux only. This cell runs Windows cells: `./this.cell app.cell.exe [args]` joins the Windows cell's layers to the root and runs its entry through this command, with $CELL_ROOT as Z:\\. The runtime must hold Wine. Default [\"wine\"]")
+  command: list<utf8>?
 }
 
 @block("registry")

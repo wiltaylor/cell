@@ -792,7 +792,47 @@ installer run) can feed the same block later.
    signing (unsigned EXEs with a large overlay trip SmartScreen), 32-bit
    and ARM64 launchers.
 
-### 16.7 Licence note
+### 16.7 Running a Windows cell on Linux (2026-10-22)
+
+A Linux cell with a `wine` block (`Manifest.wine`, `cell-launcher/src/wine.rs`)
+runs a Windows cell given as its first argument. No new format: the
+Windows cell's layers are squashfs images like any other, so they join
+the runner's overlay as further lower layers (app and runtime roles at
+`/`, data layers at their mount path), and the Windows app's files
+appear at `/app/...`, which Wine maps to `Z:\app\...`. The entry point
+is translated: `/app/x.exe` becomes `Z:\app\x.exe`, `$CELL_ROOT` becomes
+`Z:\`, and the runner's `command` (default `["wine"]`) goes in front.
+The working directory stays a Linux path.
+
+The effective manifest is the runner's with the guest's identity, entry,
+commands, home mode and network wish; `network` is the runner's cap and
+the guest's request. State dirs use the guest's id, so each game has its
+own prefix, upper and home whichever runner starts it. The registry
+declaration is rendered as a `.reg` file into `/run/cell`, and
+`<command> regedit /S` runs it as the user before the entry point
+(`Spec.user_pre_exec`, which runs after the uid drop; `pre_exec` runs as
+the outer root and would make a root-owned prefix). A stamp in the home
+holds the hash of the last declaration applied, so the keys are applied
+once, again after a reset home, and again when the declaration changes.
+That differs from Windows, where each value is written when missing.
+
+`CELL_CMD=install` and the Steam commands refuse a wrapped run for now:
+the desktop entry would need both paths. `shell`, `info`, `verify` and
+`CELL_COMMAND` work.
+
+A Proton runner (`examples/proton`) is the same thing with `command =
+["proton-run"]`, a script that exports `STEAM_COMPAT_DATA_PATH`,
+`STEAM_COMPAT_CLIENT_INSTALL_PATH` and `UMU_ID` and execs `proton run`.
+Two things learned: without `UMU_ID`, Proton starts every program
+through its `steam.exe` helper, which needs a Steam client and exits 1
+with nothing printed; with it, a Windows path launches through plain
+Wine. And runners share the guest's home but not its prefix (Wine in
+`.wine`, Proton under `proton/`), so the registry stamp names the runner
+too, or the second runner would never seed its prefix. The stamp lives
+in the home rather than the prefix because the prefix path is the
+runner's business.
+
+### 16.8 Licence note
 
 WinFsp is GPLv3 with a FLOSS exception that allows linking the DLL and
 shipping the installer from software under a FLOSS licence, with a notice

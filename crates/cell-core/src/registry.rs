@@ -140,6 +140,15 @@ impl Registry {
     }
 }
 
+/// A `.reg` text as the bytes regedit writes: UTF-16LE with a byte order
+/// mark. Wine's regedit reads `hex(2)` and `hex(7)` data as ANSI unless
+/// the file is UTF-16.
+pub fn reg_utf16(text: &str) -> Vec<u8> {
+    let mut out = vec![0xFF, 0xFE];
+    out.extend(text.encode_utf16().flat_map(|u| u.to_le_bytes()));
+    out
+}
+
 /// Normalise a key path from a build file or a `.reg` file into the
 /// manifest form: relative to `HKEY_CURRENT_USER`, `\` separated. Other
 /// hives are refused: a cell runs as the user and cannot write them.
@@ -541,8 +550,7 @@ mod tests {
             ],
         });
         let text = reg.to_reg(|s| s.to_string());
-        let mut bytes = vec![0xFF, 0xFE];
-        bytes.extend(text.encode_utf16().flat_map(|u| u.to_le_bytes()));
+        let bytes = reg_utf16(&text);
         let back = parse_reg(&decode_reg(&bytes)).unwrap();
         assert_eq!(back, reg.keys);
     }

@@ -309,6 +309,24 @@ pub struct Integration {
     pub steam: Option<Steam>,
 }
 
+/// A Linux cell that runs Windows cells: `./wine.cell app.cell.exe`. The
+/// Windows cell's layers join the root stack and its entry point runs
+/// through `command`, with `$CELL_ROOT` as `Z:\`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct Wine {
+    /// The command that runs a Windows program; the program path and its
+    /// arguments follow. `["wine"]` by default.
+    pub command: Vec<String>,
+}
+
+impl Default for Wine {
+    fn default() -> Self {
+        Wine {
+            command: vec!["wine".to_string()],
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Manifest {
     pub format_version: u32,
@@ -321,6 +339,9 @@ pub struct Manifest {
     /// the sandbox may reach. Older manifests have none.
     #[serde(default)]
     pub registry: crate::registry::Registry,
+    /// Linux only: this cell runs Windows cells through Wine.
+    #[serde(default)]
+    pub wine: Option<Wine>,
 }
 
 impl Manifest {

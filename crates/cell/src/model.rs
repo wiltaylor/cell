@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{anyhow, bail, Context, Result};
 use cell_core::format::{
     Audio, Bind, BindMode, Dbus, Desktop, Display, Entry, Gpu, HomeMode, Input, Integration,
-    Isolation, NamedCommand, NvidiaMode, PidMode, SandboxMode, Steam,
+    Isolation, NamedCommand, NvidiaMode, PidMode, SandboxMode, Steam, Wine,
 };
 use cell_core::registry::{self, RegData, RegKey, RegValue, Registry as RegistryDecl};
 use wcl_lang::{disk_loader, Block, Document, Environment, Registry, Value};
@@ -74,6 +74,8 @@ pub struct Plan {
     pub steam: Option<Steam>,
     /// Windows only: declared `HKEY_CURRENT_USER` keys.
     pub registry: RegistryDecl,
+    /// Linux only: this cell runs Windows cells through Wine.
+    pub wine: Option<Wine>,
     pub root: PathBuf,
 }
 
@@ -291,6 +293,14 @@ pub fn plan(doc: &Document, root: &Path) -> Result<Plan> {
         }
         if let Some(r) = child(src, "registry") {
             read_registry(&r, &mut plan.registry, root)?;
+        }
+        if let Some(w) = child(src, "wine") {
+            let mut wine = Wine::default();
+            let command = string_list(&w, "command")?;
+            if !command.is_empty() {
+                wine.command = command;
+            }
+            plan.wine = Some(wine);
         }
     }
     if plan.runtime.base.is_empty() && !plan.is_windows() {
@@ -685,6 +695,11 @@ pub fn validate(plan: &Plan) -> Vec<String> {
         }
     } else if !plan.registry.is_empty() {
         issues.push("registry: the block applies to Windows cells only (os = \"windows\")".into());
+    }
+    if plan.is_windows() && plan.wine.is_some() {
+        issues.push(
+            "wine: the block applies to Linux cells only; a Windows cell runs natively".into(),
+        );
     }
     let has = |d: Display| plan.integration.display.contains(&d);
     if has(Display::X11Fallback) && !has(Display::Wayland) {
